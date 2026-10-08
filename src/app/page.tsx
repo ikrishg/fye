@@ -350,8 +350,8 @@ export default function HomePage() {
       <div className="card">
         <h2>2. PayPal transaction sync</h2>
         <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-          Uses <code>list_transaction</code> /{" "}
-          <code>/v1/reporting/transactions</code> via adapter.{" "}
+          Uses the PayPal MCP <code>list_transactions</code> tool /{" "}
+          <code>/v1/reporting/transactions</code>.{" "}
           {adapterLabel || "Mock fixtures until sandbox creds are set."}
         </p>
         <button type="button" disabled={loading} onClick={syncPayPal}>

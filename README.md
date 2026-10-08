@@ -11,7 +11,7 @@ This demo is intentionally **not** a Zapier → PayPal pipe. Step 4 shows the ag
 ## P0 loop (Nov 12 acceptance)
 
 1. **Personal balance sheet** — manual assets & liabilities; net worth on dashboard (`/api/balance-sheet`).
-2. **PayPal sync** — `list_transaction` / `/v1/reporting/transactions` via `PayPalAdapter` → balance sheet lines (`POST /api/paypal/sync`).
+2. **PayPal sync** — MCP `list_transactions` / `/v1/reporting/transactions` via `PayPalAdapter` → balance sheet lines (`POST /api/paypal/sync`).
 3. **Fye on iMessage** — ingest interface with webhook (`POST /api/ingest`) and CLI (`npm run ingest`). Real iMessage bridging is platform-specific; see [docs/IMESSAGE_BRIDGE.md](docs/IMESSAGE_BRIDGE.md).
 4. **Purchase agent** — `POST /api/agent/purchase` researches against current balances; `POST /api/agent/purchase/:id/approve` creates a PayPal **sandbox** order only after human approval.
 
@@ -74,7 +74,7 @@ Never set `PAYPAL_ENV=live` for this repo; live mode throws at adapter construct
 | Tool | Used by | Notes |
 |------|---------|-------|
 | `list_transactions` | `POST /api/paypal/sync` | Toolkit params (`start_date`, `end_date`, `transaction_id`, `transaction_status`, `page`, `page_size`). |
-| `create_order` | `POST /api/agent/purchase/:id/approve` | Toolkit params plus required `fye_approval: { proposal_id, approval_token }`. Refused unless the proposal was human-approved and the order total equals the approved amount. The `approve` link in the response is the payment link. |
+| `create_order` | `POST /api/agent/purchase/:id/approve` | Toolkit params plus required `fye_approval: { proposal_id, approval_token }` and `idempotencyKey` (the proposal id, sent as `PayPal-Request-Id`). Refused unless the proposal was human-approved and the order total equals the approved amount. A repeat call with the same key returns the same order. The `approve` link in the response is the payment link. |
 
 The app connects to it in-process (in-memory MCP transport). The server reads from the same `createPayPalAdapter()` factory, so it uses fixtures unless the sandbox env vars above are set. To connect an external MCP client over stdio:
 
