@@ -67,6 +67,23 @@ Environment variables (all required to use the live sandbox adapter):
 
 Never set `PAYPAL_ENV=live` for this repo; live mode throws at adapter construction.
 
+## PayPal MCP layer
+
+`src/mcp/paypal/` is an MCP server (`fye-paypal`, built on `@modelcontextprotocol/sdk`) whose tools mirror PayPal's `@paypal/agent-toolkit`:
+
+| Tool | Used by | Notes |
+|------|---------|-------|
+| `list_transactions` | `POST /api/paypal/sync` | Toolkit params (`start_date`, `end_date`, `transaction_id`, `transaction_status`, `page`, `page_size`). |
+| `create_order` | `POST /api/agent/purchase/:id/approve` | Toolkit params plus required `fye_approval: { proposal_id, approval_token }`. Refused unless the proposal was human-approved and the order total equals the approved amount. The `approve` link in the response is the payment link. |
+
+The app connects to it in-process (in-memory MCP transport). The server reads from the same `createPayPalAdapter()` factory, so it uses fixtures unless the sandbox env vars above are set. To connect an external MCP client over stdio:
+
+```bash
+npm run mcp:paypal
+```
+
+That process has its own empty proposal store, so `create_order` always refuses there; orders are only created through the app's approve step.
+
 ## Deploy (Vercel)
 
 ```bash
