@@ -38,7 +38,7 @@ export function mapPayPalTransactionToLine(
   const name =
     amountCents >= 0
       ? `PayPal in: ${subject}`
-      : `PayPal out: ${subject}`;
+      : `Cash out: ${subject}`;
 
   return {
     id: `paypal-${txn.transaction_id}`,

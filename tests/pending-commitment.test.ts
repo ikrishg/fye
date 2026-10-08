@@ -201,7 +201,7 @@ describe("available vs cash math", () => {
       ...sheet,
       assets: [
         ...sheet.assets,
-        { id: "o1", name: "PayPal out: Coffee", amountCents: -12_50, category: "cash", source: "paypal_sync", updatedAt: "" },
+        { id: "o1", name: "Cash out: Coffee", amountCents: -12_50, category: "cash", source: "paypal_sync", updatedAt: "" },
       ],
     };
     expect(balanceTotals(withOutflow, [])).toEqual({
@@ -232,7 +232,7 @@ describe("available vs cash math", () => {
   it("matches a capture only on the same order reference and amount", () => {
     const line = {
       id: "paypal-CAP",
-      name: "PayPal out: x",
+      name: "Cash out: x",
       amountCents: -300_00,
       category: "cash" as const,
       source: "paypal_sync" as const,

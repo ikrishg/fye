@@ -30,7 +30,7 @@ describe("PayPal sync mapping", () => {
     const line = mapPayPalTransactionToLine(txn);
     expect(line?.category).toBe("cash");
     expect(line?.amountCents).toBe(-12_50);
-    expect(line?.name).toBe("PayPal out: Coffee");
+    expect(line?.name).toBe("Cash out: Coffee");
   });
 
   it("puts every synced row, in or out, on the asset (cash) side", () => {
