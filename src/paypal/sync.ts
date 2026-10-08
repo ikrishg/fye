@@ -1,9 +1,18 @@
 import { randomUUID } from "node:crypto";
-import type { BalanceSheetLine, PayPalTransaction } from "@/domain/types";
+import type {
+  BalanceSheetLine,
+  PayPalTransaction,
+  PendingCommitment,
+} from "@/domain/types";
 import { FYE_BASE_CURRENCY } from "@/lib/currency";
-import type { PayPalAdapter } from "./types";
+import type { PayPalMcpClient } from "@/mcp/paypal/client";
+import type { FyeStore } from "@/store/memory-store";
 
-/** Map PayPal reporting transaction to a balance-sheet cash line (signed amount in cents). */
+/**
+ * Map a PayPal reporting transaction to a cash line with a signed amount in
+ * cents: inflows add cash, settled outflows are cash that left (negative),
+ * never a liability.
+ */
 export function mapPayPalTransactionToLine(
   txn: PayPalTransaction,
 ): BalanceSheetLine | null {
@@ -29,15 +38,18 @@ export function mapPayPalTransactionToLine(
   const name =
     amountCents >= 0
       ? `PayPal in: ${subject}`
-      : `PayPal out: ${subject}`;
+      : `Cash out: ${subject}`;
 
   return {
     id: `paypal-${txn.transaction_id}`,
     name,
-    amountCents: Math.abs(amountCents),
-    category: amountCents >= 0 ? "cash" : "other_liability",
+    amountCents,
+    category: "cash",
     source: "paypal_sync",
     externalId: txn.transaction_id,
+    ...(txn.transaction_info?.paypal_reference_id
+      ? { orderReference: txn.transaction_info.paypal_reference_id }
+      : {}),
     updatedAt: new Date().toISOString(),
   };
 }
@@ -62,7 +74,7 @@ export function mergePayPalLines(
 }
 
 export async function syncPayPalTransactions(
-  adapter: PayPalAdapter,
+  paypal: Pick<PayPalMcpClient, "listTransactions">,
   range: { startDate: string; endDate: string },
 ): Promise<BalanceSheetLine[]> {
   const pageSize = 100;
@@ -71,14 +83,14 @@ export async function syncPayPalTransactions(
   const allTransactions: PayPalTransaction[] = [];
 
   do {
-    const result = await adapter.listTransactions({
-      startDate: range.startDate,
-      endDate: range.endDate,
+    const result = await paypal.listTransactions({
+      start_date: range.startDate,
+      end_date: range.endDate,
       page,
-      pageSize,
+      page_size: pageSize,
     });
-    allTransactions.push(...result.transactions);
-    totalPages = result.totalPages;
+    allTransactions.push(...result.transaction_details);
+    totalPages = result.total_pages;
     page += 1;
   } while (page <= totalPages);
 
@@ -90,6 +102,24 @@ export async function syncPayPalTransactions(
     }
   }
   return lines;
+}
+
+/**
+ * Replaces the sheet's paypal_sync rows with the latest list_transactions
+ * result, then settles pending commitments that the synced rows capture.
+ * Running it twice with the same data leaves the sheet and commitments unchanged.
+ */
+export async function applyPayPalSync(
+  paypal: Pick<PayPalMcpClient, "listTransactions">,
+  store: FyeStore,
+  range: { startDate: string; endDate: string },
+): Promise<{ lines: BalanceSheetLine[]; settledCommitments: PendingCommitment[] }> {
+  const lines = await syncPayPalTransactions(paypal, range);
+  const current = store.getBalanceSheet();
+  const merged = mergePayPalLines(current.assets, current.liabilities, lines);
+  store.replacePayPalSync(merged.assets, merged.liabilities);
+  const settledCommitments = store.settleCommitments(lines);
+  return { lines, settledCommitments };
 }
 
 /** Ingest-side: record a single PayPal-style spend as liability line */

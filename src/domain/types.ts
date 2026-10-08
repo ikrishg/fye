@@ -16,7 +16,27 @@ export interface BalanceSheetLine {
   category: AssetCategory | LiabilityCategory;
   source: "manual" | "paypal_sync" | "imessage_ingest";
   externalId?: string;
+  /** PayPal `paypal_reference_id` (the order id for an order capture). */
+  orderReference?: string;
   updatedAt: string;
+}
+
+/**
+ * Money promised to an approved PayPal order that hasn't been captured yet.
+ * It reduces available balance, not cash or net worth, until a synced
+ * capture for the same order settles it.
+ */
+export interface PendingCommitment {
+  id: string;
+  proposalId: string;
+  orderId: string;
+  name: string;
+  amountCents: number;
+  currency: string;
+  status: "pending" | "settled";
+  createdAt: string;
+  settledAt?: string;
+  settledByTransactionId?: string;
 }
 
 export interface BalanceSheet {
@@ -62,7 +82,8 @@ export type PurchaseProposalStatus =
   | "creating_order"
   | "approved"
   | "rejected"
-  | "order_created";
+  | "order_created"
+  | "settled";
 
 export interface PurchaseProposal {
   id: string;
@@ -77,6 +98,10 @@ export interface PurchaseProposal {
   };
   status: PurchaseProposalStatus;
   paypalOrderId?: string;
+  /** create_order's `approve` link: the payment link for this order. */
+  paypalApprovalUrl?: string;
+  /** Synced capture that settled this order's commitment. */
+  settledByTransactionId?: string;
   approvalToken: string;
   createdAt: string;
 }

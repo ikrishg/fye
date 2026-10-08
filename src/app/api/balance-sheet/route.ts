@@ -4,28 +4,14 @@ import { ZodError } from "zod";
 import {
   createManualAsset,
   createManualLiability,
-  netWorthCents,
-  sumAssets,
-  sumLiabilities,
 } from "@/domain/balance-sheet";
 import { balanceSheetEntrySchema } from "@/domain/balance-sheet-input";
 import { AuthError } from "@/lib/auth";
 import { assertOwnerAuth } from "@/lib/auth-server";
-import type { BalanceSheet } from "@/domain/types";
+import { balanceSheetPayload } from "@/lib/balance-payload";
 import { getStore } from "@/store/memory-store";
 
 export const runtime = "nodejs";
-
-function totalsPayload(sheet: BalanceSheet) {
-  return {
-    sheet,
-    totals: {
-      assetsCents: sumAssets(sheet),
-      liabilitiesCents: sumLiabilities(sheet),
-      netWorthCents: netWorthCents(sheet),
-    },
-  };
-}
 
 export async function GET(request: Request) {
   try {
@@ -38,7 +24,7 @@ export async function GET(request: Request) {
   }
 
   const store = getStore();
-  return NextResponse.json(totalsPayload(store.getBalanceSheet()));
+  return NextResponse.json(balanceSheetPayload(store));
 }
 
 export async function POST(request: Request) {
@@ -74,7 +60,7 @@ export async function POST(request: Request) {
       store.addManualLiability(line);
     }
 
-    return NextResponse.json(totalsPayload(store.getBalanceSheet()));
+    return NextResponse.json(balanceSheetPayload(store));
   } catch (err) {
     if (err instanceof ZodError) {
       return NextResponse.json(

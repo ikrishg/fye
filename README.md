@@ -11,9 +11,9 @@ This demo is intentionally **not** a Zapier → PayPal pipe. Step 4 shows the ag
 ## P0 loop (Nov 12 acceptance)
 
 1. **Personal balance sheet** — manual assets & liabilities; net worth on dashboard (`/api/balance-sheet`).
-2. **PayPal sync** — `list_transaction` / `/v1/reporting/transactions` via `PayPalAdapter` → balance sheet lines (`POST /api/paypal/sync`).
+2. **PayPal sync** — MCP `list_transactions` / `/v1/reporting/transactions` via `PayPalAdapter` → signed cash lines (`POST /api/paypal/sync`). Inflows add cash; settled outflows are cash that left (negative), never liabilities. Liabilities hold only real debts.
 3. **Fye on iMessage** — ingest interface with webhook (`POST /api/ingest`) and CLI (`npm run ingest`). Real iMessage bridging is platform-specific; see [docs/IMESSAGE_BRIDGE.md](docs/IMESSAGE_BRIDGE.md).
-4. **Purchase agent** — `POST /api/agent/purchase` researches against current balances; `POST /api/agent/purchase/:id/approve` creates a PayPal **sandbox** order only after human approval.
+4. **Purchase agent** — `POST /api/agent/purchase` researches against Available (liquid cash minus pending commitments); `POST /api/agent/purchase/:id/approve` creates a PayPal **sandbox** order only after human approval.
 
 **Out of scope:** bank/card sync beyond PayPal, Bill Split REST, Agent Ready/ACP, hands-off spending.
 
@@ -66,6 +66,29 @@ Environment variables (all required to use the live sandbox adapter):
 - `POST /v2/checkout/orders` for approved purchases
 
 Never set `PAYPAL_ENV=live` for this repo; live mode throws at adapter construction.
+
+## PayPal MCP layer
+
+`src/mcp/paypal/` is an MCP server (`fye-paypal`, built on `@modelcontextprotocol/sdk`) whose tools mirror PayPal's `@paypal/agent-toolkit`:
+
+| Tool | Used by | Notes |
+|------|---------|-------|
+| `list_transactions` | `POST /api/paypal/sync` | Toolkit params (`start_date`, `end_date`, `transaction_id`, `transaction_status`, `page`, `page_size`). |
+| `create_order` | `POST /api/agent/purchase/:id/approve` | Toolkit params plus required `fye_approval: { proposal_id, approval_token }` and `idempotencyKey` (the proposal id, sent as `PayPal-Request-Id`). Refused unless the proposal was human-approved and the order total equals the approved amount. A repeat call with the same key returns the same order. The `approve` link in the response is the payment link. |
+
+The app connects to it in-process (in-memory MCP transport). The server reads from the same `createPayPalAdapter()` factory, so it uses fixtures unless the sandbox env vars above are set. To connect an external MCP client over stdio:
+
+```bash
+npm run mcp:paypal
+```
+
+That process has its own empty proposal store, so `create_order` always refuses there; orders are only created through the app's approve step.
+
+### Pending commitments
+
+When approve creates an order, it's recorded once per order id as a pending commitment. It lowers **Available** (liquid cash minus pending commitments) but not cash or net worth. The approve screen shows the order's approve link; in fixture mode it points at `mock-paypal.invalid`.
+
+A later sync settles the commitment when a `list_transactions` outflow has `paypal_reference_id` equal to the order id and the same amount. The commitment clears and the synced outflow takes the money off cash instead, so Available doesn't change on settle; net worth drops then. Pending commitments are listed with liabilities on the sheet but don't count toward the liabilities total or net worth. Re-syncing and retrying approve don't settle again or add a second commitment. In fixture mode, each mock order shows up as a fixture capture (`MOCK-CAP-<first 8 chars of proposal id>`) in the next sync, standing in for the buyer paying.
 
 ## Deploy (Vercel)
 

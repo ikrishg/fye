@@ -8,6 +8,21 @@ interface Totals {
   assetsCents: number;
   liabilitiesCents: number;
   netWorthCents: number;
+  liquidCashCents: number;
+  pendingCommitmentsCents: number;
+  availableCents: number;
+}
+
+interface Commitment {
+  id: string;
+  orderId: string;
+  name: string;
+  amountCents: number;
+}
+
+interface SettledCommitment extends Commitment {
+  proposalId: string;
+  settledByTransactionId?: string;
 }
 
 interface Line {
@@ -37,15 +52,27 @@ interface Proposal {
   status: string;
   approvalToken: string;
   paypalOrderId?: string;
+  paypalApprovalUrl?: string;
+  settledByTransactionId?: string;
 }
 
 function money(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
+  const sign = cents < 0 ? "-" : "";
+  return `${sign}$${(Math.abs(cents) / 100).toFixed(2)}`;
+}
+
+function isMockApprovalUrl(href: string): boolean {
+  try {
+    return new URL(href).hostname.endsWith(".invalid");
+  } catch {
+    return false;
+  }
 }
 
 export default function HomePage() {
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [totals, setTotals] = useState<Totals | null>(null);
+  const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [adapterLabel, setAdapterLabel] = useState<string>("");
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [log, setLog] = useState<string[]>([]);
@@ -72,6 +99,7 @@ export default function HomePage() {
     const data = await res.json();
     setSheet(data.sheet);
     setTotals(data.totals);
+    setCommitments(data.commitments ?? []);
   }, []);
 
   useEffect(() => {
@@ -107,6 +135,7 @@ export default function HomePage() {
       const data = await res.json();
       setSheet(data.sheet);
       setTotals(data.totals);
+      setCommitments(data.commitments ?? []);
       pushLog(`Added manual ${side}: ${name}`);
     });
   }
@@ -121,8 +150,19 @@ export default function HomePage() {
       const data = await res.json();
       setSheet(data.sheet);
       setTotals(data.totals);
+      setCommitments(data.commitments ?? []);
       setAdapterLabel(data.adapter);
       pushLog(`PayPal sync: ${data.syncedCount} transactions (${data.adapter})`);
+      const settled: SettledCommitment[] = data.settledCommitments ?? [];
+      for (const c of settled) {
+        pushLog(`Commitment settled: ${c.orderId} by ${c.settledByTransactionId}`);
+      }
+      setProposal((p) => {
+        const match = p && settled.find((c) => c.proposalId === p.id);
+        return match
+          ? { ...p, status: "settled", settledByTransactionId: match.settledByTransactionId }
+          : p;
+      });
     });
   }
 
@@ -220,6 +260,7 @@ export default function HomePage() {
       if (res.ok) {
         setProposal({ ...data.proposal, approvalToken: token });
         pushLog(`PayPal sandbox order created: ${data.proposal.paypalOrderId}`);
+        await refresh();
       } else {
         pushLog(`Approval blocked: ${data.error}`);
       }
@@ -268,6 +309,16 @@ export default function HomePage() {
             <div className="stat">
               {money(totals.assetsCents)} / {money(totals.liabilitiesCents)}
             </div>
+          </div>
+          <div>
+            <div className="stat-label">Liquid cash</div>
+            <div className="stat">{money(totals.liquidCashCents)}</div>
+          </div>
+          <div>
+            <div className="stat-label">
+              Available (cash − {money(totals.pendingCommitmentsCents)} pending)
+            </div>
+            <div className="stat">{money(totals.availableCents)}</div>
           </div>
         </div>
       )}
@@ -329,7 +380,7 @@ export default function HomePage() {
               {sheet.assets.map((l) => (
                 <tr key={l.id}>
                   <td>{l.name}</td>
-                  <td>Asset</td>
+                  <td>{l.amountCents < 0 ? "Cash out" : "Asset"}</td>
                   <td><span className="tag">{l.source}</span></td>
                   <td>{money(l.amountCents)}</td>
                 </tr>
@@ -342,6 +393,14 @@ export default function HomePage() {
                   <td>{money(l.amountCents)}</td>
                 </tr>
               ))}
+              {commitments.map((c) => (
+                <tr key={c.id}>
+                  <td>Pending: {c.name} ({c.orderId})</td>
+                  <td>Commitment</td>
+                  <td><span className="tag">pending_commitment</span></td>
+                  <td>{money(c.amountCents)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
@@ -350,8 +409,8 @@ export default function HomePage() {
       <div className="card">
         <h2>2. PayPal transaction sync</h2>
         <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-          Uses <code>list_transaction</code> /{" "}
-          <code>/v1/reporting/transactions</code> via adapter.{" "}
+          Uses the PayPal MCP <code>list_transactions</code> tool /{" "}
+          <code>/v1/reporting/transactions</code>.{" "}
           {adapterLabel || "Mock fixtures until sandbox creds are set."}
         </p>
         <button type="button" disabled={loading} onClick={syncPayPal}>
@@ -396,8 +455,19 @@ export default function HomePage() {
             <p className={proposal.research.canAfford ? "ok" : "warn"}>
               {proposal.research.canAfford ? "Can afford" : "Caution"} — status:{" "}
               {proposal.status}
+              {proposal.settledByTransactionId ? ` — ${proposal.settledByTransactionId}` : ""}
               {proposal.paypalOrderId ? ` · order ${proposal.paypalOrderId}` : ""}
             </p>
+            {proposal.paypalApprovalUrl && (
+              <p id="approve-link">
+                Approve link (payment link):{" "}
+                <a href={proposal.paypalApprovalUrl} target="_blank" rel="noreferrer">
+                  {proposal.paypalApprovalUrl}
+                </a>
+                {isMockApprovalUrl(proposal.paypalApprovalUrl) &&
+                  " (fixture mock link, not a real PayPal page)"}
+              </p>
+            )}
             {proposal.research.warnings.map((w) => (
               <p key={w} className="warn">{w}</p>
             ))}
