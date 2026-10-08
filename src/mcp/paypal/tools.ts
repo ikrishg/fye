@@ -7,8 +7,10 @@ import type { FyeStore } from "@/store/memory-store";
 /**
  * Tool names and input shapes mirror @paypal/agent-toolkit@1.11.0
  * (`list_transactions`, `create_order`) so this server can be swapped for
- * PayPal's own MCP server later. `fye_approval` is fye-specific: PayPal's
- * create_order has no human gate, ours refuses without an approved proposal.
+ * PayPal's own MCP server later. `fye_approval` and `idempotencyKey` are
+ * fye-specific: PayPal's create_order has no human gate, ours refuses without
+ * an approved proposal, and replays the same order for a repeated key
+ * (sent to PayPal as `PayPal-Request-Id`).
  */
 export const PAYPAL_MCP_TOOLS = {
   listTransactions: "list_transactions",
@@ -50,6 +52,7 @@ export const createOrderShape = {
   notes: z.string().nullable().optional().default(null),
   returnUrl: z.string().optional().default("https://example.com/returnUrl"),
   cancelUrl: z.string().optional().default("https://example.com/cancelUrl"),
+  idempotencyKey: z.string().min(1),
   fye_approval: z.object({
     proposal_id: z.string().min(1),
     approval_token: z.string().min(1),
@@ -76,6 +79,11 @@ export interface PayPalMcpDeps {
 }
 
 const toCents = (value: number) => Math.round(value * 100);
+
+/** One order per proposal: the key is the proposal id. */
+export function orderIdempotencyKey(proposalId: string): string {
+  return proposalId;
+}
 
 export function orderTotalCents(args: z.output<typeof createOrderSchema>): number {
   const itemsCents = args.items.reduce((sum, item) => {
@@ -118,8 +126,6 @@ export async function listTransactions(
 }
 
 export function createOrderTool(deps: PayPalMcpDeps) {
-  const inFlight = new Set<string>();
-
   return async function createOrder(rawArgs: CreateOrderArgs): Promise<CreateOrderResult> {
     const args = createOrderSchema.parse(rawArgs);
     const { proposal_id, approval_token } = args.fye_approval;
@@ -131,7 +137,11 @@ export function createOrderTool(deps: PayPalMcpDeps) {
     if (proposal.approvalToken !== approval_token) {
       throw new ApprovalGateError("Invalid approval token.");
     }
-    if (proposal.status !== "creating_order" || inFlight.has(proposal_id)) {
+    if (args.idempotencyKey !== orderIdempotencyKey(proposal.id)) {
+      throw new ApprovalGateError("idempotencyKey must be derived from the proposal id.");
+    }
+    const replay = proposal.status === "order_created";
+    if (proposal.status !== "creating_order" && !replay) {
       throw new ApprovalGateError(
         `create_order requires a human-approved proposal (status=${proposal.status}).`,
       );
@@ -145,40 +155,43 @@ export function createOrderTool(deps: PayPalMcpDeps) {
       throw new ApprovalGateError("Order total does not match the approved proposal.");
     }
 
-    inFlight.add(proposal_id);
-    try {
-      const description = args.notes ?? args.items.map((i) => i.name).join(", ");
-      const order = await deps.adapter.createSandboxOrder({
-        amountCents: totalCents,
-        currency: args.currencyCode,
-        description,
-        idempotencyKey: proposal.id,
-      });
+    const description = args.notes ?? args.items.map((i) => i.name).join(", ");
+    const order = await deps.adapter.createSandboxOrder({
+      amountCents: totalCents,
+      currency: args.currencyCode,
+      description,
+      idempotencyKey: args.idempotencyKey,
+    });
 
+    if (replay) {
+      if (order.orderId !== proposal.paypalOrderId) {
+        throw new Error(
+          `Idempotent replay returned order ${order.orderId}, expected ${proposal.paypalOrderId}.`,
+        );
+      }
+    } else {
       deps.store.saveProposal({
         ...proposal,
         status: "order_created",
         paypalOrderId: order.orderId,
       });
-
-      return {
-        mode: deps.adapter.mode,
-        id: order.orderId,
-        status: "CREATED",
-        intent: "CAPTURE",
-        purchase_units: [
-          {
-            amount: {
-              currency_code: args.currencyCode,
-              value: (totalCents / 100).toFixed(2),
-            },
-            description,
-          },
-        ],
-        links: [{ rel: "approve", href: order.approvalUrl, method: "GET" }],
-      };
-    } finally {
-      inFlight.delete(proposal_id);
     }
+
+    return {
+      mode: deps.adapter.mode,
+      id: order.orderId,
+      status: "CREATED",
+      intent: "CAPTURE",
+      purchase_units: [
+        {
+          amount: {
+            currency_code: args.currencyCode,
+            value: (totalCents / 100).toFixed(2),
+          },
+          description,
+        },
+      ],
+      links: [{ rel: "approve", href: order.approvalUrl, method: "GET" }],
+    };
   };
 }

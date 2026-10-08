@@ -126,13 +126,33 @@ describe("fye PayPal MCP server", () => {
       ).rejects.toThrow(PayPalMcpToolError);
     });
 
-    it("creates a fixture order once approved, and only once", async () => {
+    it("refuses calls without idempotencyKey (schema-level)", async () => {
+      const proposal = newProposal();
+      store.saveProposal({ ...proposal, status: "creating_order" });
+      const { idempotencyKey: _omit, ...args } = orderArgsForProposal(proposal);
+      await expect(
+        paypal.createOrder(args as Parameters<PayPalMcpClient["createOrder"]>[0]),
+      ).rejects.toThrow(PayPalMcpToolError);
+    });
+
+    it("refuses an idempotencyKey not derived from the proposal id", async () => {
+      const spy = vi.spyOn(adapter, "createSandboxOrder");
+      const proposal = newProposal();
+      store.saveProposal({ ...proposal, status: "creating_order" });
+      await expect(
+        paypal.createOrder({ ...orderArgsForProposal(proposal), idempotencyKey: "fresh-key" }),
+      ).rejects.toThrow(/idempotencyKey/);
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("creates a fixture order once approved, and replays it for the same key", async () => {
+      const spy = vi.spyOn(adapter, "createSandboxOrder");
       const proposal = newProposal(299_00);
       store.saveProposal({ ...proposal, status: "creating_order" });
 
       const order = await paypal.createOrder(orderArgsForProposal(proposal));
       expect(order.mode).toBe("mock");
-      expect(order.id).toMatch(/^MOCK-ORDER-/);
+      expect(order.id).toBe(`MOCK-ORDER-${proposal.id.slice(0, 8)}`);
       expect(order.status).toBe("CREATED");
       expect(order.purchase_units[0]?.amount).toEqual({ currency_code: "USD", value: "299.00" });
       expect(order.links[0]?.rel).toBe("approve");
@@ -141,9 +161,13 @@ describe("fye PayPal MCP server", () => {
       expect(saved?.status).toBe("order_created");
       expect(saved?.paypalOrderId).toBe(order.id);
 
-      await expect(paypal.createOrder(orderArgsForProposal(proposal))).rejects.toThrow(
-        /status=order_created/,
-      );
+      const retry = await paypal.createOrder(orderArgsForProposal(proposal));
+      expect(retry.id).toBe(order.id);
+      expect(store.getProposal(proposal.id)?.paypalOrderId).toBe(order.id);
+      expect(spy.mock.calls.map(([input]) => input.idempotencyKey)).toEqual([
+        proposal.id,
+        proposal.id,
+      ]);
     });
   });
 
@@ -155,6 +179,7 @@ describe("fye PayPal MCP server", () => {
       ],
       shippingCost: 3,
       discount: 1,
+      idempotencyKey: "p",
       fye_approval: { proposal_id: "p", approval_token: "t" },
     });
     expect(orderTotalCents(args)).toBe(2 * (1010 + 101) + 300 - 100);

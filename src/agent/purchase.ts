@@ -1,5 +1,5 @@
 import type { PayPalMcpClient } from "@/mcp/paypal/client";
-import type { CreateOrderArgs } from "@/mcp/paypal/tools";
+import { orderIdempotencyKey, type CreateOrderArgs } from "@/mcp/paypal/tools";
 import type { PurchaseProposal } from "@/domain/types";
 import type { FyeStore } from "@/store/memory-store";
 import { ProposalReserveError } from "@/store/memory-store";
@@ -46,6 +46,7 @@ export function orderArgsForProposal(proposal: PurchaseProposal): CreateOrderArg
       },
     ],
     notes: proposal.request.description,
+    idempotencyKey: orderIdempotencyKey(proposal.id),
     fye_approval: {
       proposal_id: proposal.id,
       approval_token: proposal.approvalToken,
@@ -56,6 +57,8 @@ export function orderArgsForProposal(proposal: PurchaseProposal): CreateOrderArg
 /**
  * Reserves the proposal (the human approval), then asks the PayPal MCP server
  * to create the order. The MCP `create_order` tool re-checks the reservation.
+ * Retrying an approved proposal replays create_order with the same
+ * idempotency key, so it returns the original order instead of a new one.
  */
 export async function executeApprovedPurchase(
   paypal: PayPalMcpClient,
@@ -67,24 +70,9 @@ export async function executeApprovedPurchase(
     throw new ApprovalGateError("Human approval required (approved must be true).");
   }
 
-  const existing = store.getProposal(proposalId);
-  if (!existing) {
-    throw new ApprovalGateError("Proposal not found");
-  }
-
-  if (existing.status === "order_created") {
-    if (approval.approvalToken !== existing.approvalToken) {
-      throw new ApprovalGateError("Invalid approval token.");
-    }
-    return existing;
-  }
-
   let reserved: PurchaseProposal;
   try {
     reserved = store.reserveProposalForOrder(proposalId, approval.approvalToken);
-    if (reserved.status === "order_created") {
-      return reserved;
-    }
   } catch (err) {
     if (err instanceof ProposalReserveError) {
       throw new ApprovalGateError(err.message);
@@ -95,7 +83,9 @@ export async function executeApprovedPurchase(
   try {
     await paypal.createOrder(orderArgsForProposal(reserved));
   } catch (err) {
-    store.saveProposal({ ...reserved, status: "pending_approval" });
+    if (reserved.status === "creating_order") {
+      store.saveProposal({ ...reserved, status: "pending_approval" });
+    }
     throw err;
   }
 
