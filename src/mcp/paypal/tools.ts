@@ -174,6 +174,7 @@ export function createOrderTool(deps: PayPalMcpDeps) {
         ...proposal,
         status: "order_created",
         paypalOrderId: order.orderId,
+        paypalApprovalUrl: order.approvalUrl,
       });
     }
 

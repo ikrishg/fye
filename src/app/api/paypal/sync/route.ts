@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { netWorthCents, sumAssets, sumLiabilities } from "@/domain/balance-sheet";
 import { AuthError } from "@/lib/auth";
 import { assertOwnerAuth } from "@/lib/auth-server";
+import { balanceSheetPayload } from "@/lib/balance-payload";
 import { withPayPalMcp } from "@/mcp/paypal/client";
 import { PAYPAL_MCP_SERVER_NAME } from "@/mcp/paypal/server";
 import { PAYPAL_MCP_TOOLS } from "@/mcp/paypal/tools";
 import { paypalAdapterLabel } from "@/paypal/factory";
-import { mergePayPalLines, syncPayPalTransactions } from "@/paypal/sync";
+import { applyPayPalSync } from "@/paypal/sync";
 
 export const runtime = "nodejs";
 
@@ -42,12 +42,8 @@ export async function POST(request: Request) {
   }
 
   return withPayPalMcp(async (paypal, { adapter, store }) => {
-    const lines = await syncPayPalTransactions(paypal, range);
-    const current = store.getBalanceSheet();
-    const merged = mergePayPalLines(current.assets, current.liabilities, lines);
-    store.replacePayPalSync(merged.assets, merged.liabilities);
+    const { lines, settledCommitments } = await applyPayPalSync(paypal, store, range);
 
-    const sheet = store.getBalanceSheet();
     return NextResponse.json({
       adapter: paypalAdapterLabel(adapter),
       mcp: {
@@ -56,12 +52,8 @@ export async function POST(request: Request) {
         transactionIds: lines.map((l) => l.externalId),
       },
       syncedCount: lines.length,
-      sheet,
-      totals: {
-        assetsCents: sumAssets(sheet),
-        liabilitiesCents: sumLiabilities(sheet),
-        netWorthCents: netWorthCents(sheet),
-      },
+      settledCommitments,
+      ...balanceSheetPayload(store),
     });
   });
 }

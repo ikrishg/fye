@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { BalanceSheetLine, PayPalTransaction } from "@/domain/types";
+import type {
+  BalanceSheetLine,
+  PayPalTransaction,
+  PendingCommitment,
+} from "@/domain/types";
 import { FYE_BASE_CURRENCY } from "@/lib/currency";
 import type { PayPalMcpClient } from "@/mcp/paypal/client";
+import type { FyeStore } from "@/store/memory-store";
 
 /** Map PayPal reporting transaction to a balance-sheet cash line (signed amount in cents). */
 export function mapPayPalTransactionToLine(
@@ -38,6 +43,9 @@ export function mapPayPalTransactionToLine(
     category: amountCents >= 0 ? "cash" : "other_liability",
     source: "paypal_sync",
     externalId: txn.transaction_id,
+    ...(txn.transaction_info?.paypal_reference_id
+      ? { orderReference: txn.transaction_info.paypal_reference_id }
+      : {}),
     updatedAt: new Date().toISOString(),
   };
 }
@@ -90,6 +98,24 @@ export async function syncPayPalTransactions(
     }
   }
   return lines;
+}
+
+/**
+ * Replaces the sheet's paypal_sync rows with the latest list_transactions
+ * result, then settles pending commitments that the synced rows capture.
+ * Running it twice with the same data leaves the sheet and commitments unchanged.
+ */
+export async function applyPayPalSync(
+  paypal: Pick<PayPalMcpClient, "listTransactions">,
+  store: FyeStore,
+  range: { startDate: string; endDate: string },
+): Promise<{ lines: BalanceSheetLine[]; settledCommitments: PendingCommitment[] }> {
+  const lines = await syncPayPalTransactions(paypal, range);
+  const current = store.getBalanceSheet();
+  const merged = mergePayPalLines(current.assets, current.liabilities, lines);
+  store.replacePayPalSync(merged.assets, merged.liabilities);
+  const settledCommitments = store.settleCommitments(lines);
+  return { lines, settledCommitments };
 }
 
 /** Ingest-side: record a single PayPal-style spend as liability line */

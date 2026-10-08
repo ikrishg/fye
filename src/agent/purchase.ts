@@ -59,6 +59,7 @@ export function orderArgsForProposal(proposal: PurchaseProposal): CreateOrderArg
  * to create the order. The MCP `create_order` tool re-checks the reservation.
  * Retrying an approved proposal replays create_order with the same
  * idempotency key, so it returns the original order instead of a new one.
+ * The order is recorded as a pending commitment, once per order id.
  */
 export async function executeApprovedPurchase(
   paypal: PayPalMcpClient,
@@ -90,8 +91,15 @@ export async function executeApprovedPurchase(
   }
 
   const completed = store.getProposal(proposalId);
-  if (!completed) {
-    throw new Error(`Proposal ${proposalId} disappeared after create_order.`);
+  if (!completed?.paypalOrderId) {
+    throw new Error(`Proposal ${proposalId} has no order after create_order.`);
   }
+  store.recordPendingCommitment({
+    proposalId: completed.id,
+    orderId: completed.paypalOrderId,
+    name: completed.request.description,
+    amountCents: completed.request.amountCents,
+    currency: completed.request.currency,
+  });
   return completed;
 }
