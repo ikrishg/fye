@@ -1,0 +1,48 @@
+{
+  "transaction_details": [
+    {
+      "transaction_info": {
+        "transaction_id": "MOCK-TXN-001",
+        "transaction_status": "S",
+        "transaction_subject": "Coffee Shop",
+        "transaction_event_code": "T0006",
+        "transaction_amount": {
+          "currency_code": "USD",
+          "value": "-12.50"
+        }
+      },
+      "payer_info": {
+        "email_address": "buyer@example.com"
+      }
+    },
+    {
+      "transaction_info": {
+        "transaction_id": "MOCK-TXN-002",
+        "transaction_status": "S",
+        "transaction_subject": "Freelance payment",
+        "transaction_event_code": "T0000",
+        "transaction_amount": {
+          "currency_code": "USD",
+          "value": "450.00"
+        }
+      },
+      "payer_info": {
+        "email_address": "client@example.com"
+      }
+    },
+    {
+      "transaction_info": {
+        "transaction_id": "MOCK-TXN-003",
+        "transaction_status": "S",
+        "transaction_subject": "Subscription",
+        "transaction_event_code": "T0006",
+        "transaction_amount": {
+          "currency_code": "USD",
+          "value": "-9.99"
+        }
+      }
+    }
+  ],
+  "total_items": 3,
+  "total_pages": 1
+}
