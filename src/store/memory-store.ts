@@ -131,7 +131,7 @@ export function createMemoryStore(): FyeStore {
       if (proposal.approvalToken !== approvalToken) {
         throw new ProposalReserveError("Invalid approval token");
       }
-      if (proposal.status === "order_created") {
+      if (proposal.status === "order_created" || proposal.status === "settled") {
         return proposal;
       }
       if (proposal.status === "creating_order") {
@@ -181,6 +181,14 @@ export function createMemoryStore(): FyeStore {
         };
         commitments.set(commitment.id, next);
         settled.push({ ...next });
+        const proposal = proposals.get(commitment.proposalId);
+        if (proposal?.status === "order_created") {
+          proposals.set(proposal.id, {
+            ...proposal,
+            status: "settled",
+            settledByTransactionId: line.externalId,
+          });
+        }
       }
       return settled;
     },

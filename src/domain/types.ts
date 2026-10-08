@@ -82,7 +82,8 @@ export type PurchaseProposalStatus =
   | "creating_order"
   | "approved"
   | "rejected"
-  | "order_created";
+  | "order_created"
+  | "settled";
 
 export interface PurchaseProposal {
   id: string;
@@ -99,6 +100,8 @@ export interface PurchaseProposal {
   paypalOrderId?: string;
   /** create_order's `approve` link: the payment link for this order. */
   paypalApprovalUrl?: string;
+  /** Synced capture that settled this order's commitment. */
+  settledByTransactionId?: string;
   approvalToken: string;
   createdAt: string;
 }

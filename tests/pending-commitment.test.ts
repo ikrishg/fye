@@ -134,6 +134,13 @@ describe("pending commitment on approve", () => {
       availableCents: 2628_51,
     });
     expect(afterSettle.availableCents).toBe(afterApprove.availableCents);
+    expect(store.getProposal(proposal.id)).toEqual(
+      expect.objectContaining({
+        status: "settled",
+        paypalOrderId: orderId,
+        settledByTransactionId: captureId,
+      }),
+    );
   });
 
   it("does not settle or double-count on a second sync", async () => {
@@ -155,8 +162,11 @@ describe("pending commitment on approve", () => {
   it("does not re-open a settled commitment when approve is retried", async () => {
     await executeApprovedPurchase(paypal, store, proposal.id, approval);
     await applyPayPalSync(paypal, store, range);
-    await executeApprovedPurchase(paypal, store, proposal.id, approval);
+    const retried = await executeApprovedPurchase(paypal, store, proposal.id, approval);
 
+    expect(retried).toEqual(
+      expect.objectContaining({ status: "settled", paypalOrderId: orderId }),
+    );
     expect(store.listCommitments()).toEqual([
       expect.objectContaining({ orderId, status: "settled" }),
     ]);

@@ -140,7 +140,7 @@ export function createOrderTool(deps: PayPalMcpDeps) {
     if (args.idempotencyKey !== orderIdempotencyKey(proposal.id)) {
       throw new ApprovalGateError("idempotencyKey must be derived from the proposal id.");
     }
-    const replay = proposal.status === "order_created";
+    const replay = proposal.status === "order_created" || proposal.status === "settled";
     if (proposal.status !== "creating_order" && !replay) {
       throw new ApprovalGateError(
         `create_order requires a human-approved proposal (status=${proposal.status}).`,

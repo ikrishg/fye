@@ -20,6 +20,11 @@ interface Commitment {
   amountCents: number;
 }
 
+interface SettledCommitment extends Commitment {
+  proposalId: string;
+  settledByTransactionId?: string;
+}
+
 interface Line {
   id: string;
   name: string;
@@ -48,6 +53,7 @@ interface Proposal {
   approvalToken: string;
   paypalOrderId?: string;
   paypalApprovalUrl?: string;
+  settledByTransactionId?: string;
 }
 
 function money(cents: number): string {
@@ -147,9 +153,16 @@ export default function HomePage() {
       setCommitments(data.commitments ?? []);
       setAdapterLabel(data.adapter);
       pushLog(`PayPal sync: ${data.syncedCount} transactions (${data.adapter})`);
-      for (const c of data.settledCommitments ?? []) {
+      const settled: SettledCommitment[] = data.settledCommitments ?? [];
+      for (const c of settled) {
         pushLog(`Commitment settled: ${c.orderId} by ${c.settledByTransactionId}`);
       }
+      setProposal((p) => {
+        const match = p && settled.find((c) => c.proposalId === p.id);
+        return match
+          ? { ...p, status: "settled", settledByTransactionId: match.settledByTransactionId }
+          : p;
+      });
     });
   }
 
@@ -442,6 +455,7 @@ export default function HomePage() {
             <p className={proposal.research.canAfford ? "ok" : "warn"}>
               {proposal.research.canAfford ? "Can afford" : "Caution"} — status:{" "}
               {proposal.status}
+              {proposal.settledByTransactionId ? ` — ${proposal.settledByTransactionId}` : ""}
               {proposal.paypalOrderId ? ` · order ${proposal.paypalOrderId}` : ""}
             </p>
             {proposal.paypalApprovalUrl && (

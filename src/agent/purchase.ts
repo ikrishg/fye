@@ -24,7 +24,8 @@ export function assertHumanApproval(
   if (
     proposal.status !== "pending_approval" &&
     proposal.status !== "creating_order" &&
-    proposal.status !== "order_created"
+    proposal.status !== "order_created" &&
+    proposal.status !== "settled"
   ) {
     throw new ApprovalGateError(
       `Proposal is not pending approval (status=${proposal.status}).`,
