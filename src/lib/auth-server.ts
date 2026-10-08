@@ -5,6 +5,7 @@ import {
   getIngestSecret,
   getOwnerSecret,
 } from "./auth";
+import { ingestAuthAllowed } from "./auth-policy";
 
 export async function assertOwnerAuth(request: Request): Promise<void> {
   const expected = getOwnerSecret();
@@ -18,14 +19,16 @@ export async function assertOwnerAuth(request: Request): Promise<void> {
   }
 }
 
-export async function assertIngestAuth(request: Request): Promise<void> {
-  const expected = getIngestSecret();
-  const provided =
-    extractBearer(request) ??
-    request.headers.get("x-fye-ingest-secret")?.trim() ??
-    null;
+export async function assertIngestOrOwnerAuth(request: Request): Promise<void> {
+  const ownerSecret = getOwnerSecret();
+  const ingestSecret = getIngestSecret();
+  const sessionCookie = (await cookies()).get("fye_session")?.value ?? null;
 
-  if (!provided || provided !== expected) {
-    throw new AuthError("Ingest authentication required");
+  if (
+    ingestAuthAllowed(request, ownerSecret, ingestSecret, sessionCookie)
+  ) {
+    return;
   }
+
+  throw new AuthError("Ingest authentication required");
 }

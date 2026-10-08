@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { withLoadingFlag } from "@/lib/loading";
-import { ensureOwnerSession, ownerFetch } from "@/lib/owner-fetch";
+import { ownerFetch, signInOwner } from "@/lib/owner-fetch";
 
 interface Totals {
   assetsCents: number;
@@ -50,17 +50,25 @@ export default function HomePage() {
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
+  const [signInError, setSignInError] = useState<string | null>(null);
 
   const pushLog = (msg: string) =>
     setLog((prev) => [`${new Date().toLocaleTimeString()} — ${msg}`, ...prev].slice(0, 12));
 
   const refresh = useCallback(async () => {
-    await ensureOwnerSession();
     const res = await ownerFetch("/api/balance-sheet");
+    if (res.status === 401) {
+      setNeedsSignIn(true);
+      pushLog("Owner sign-in required");
+      return;
+    }
     if (!res.ok) {
       pushLog(`Balance sheet load failed (${res.status})`);
       return;
     }
+    setNeedsSignIn(false);
+    setSignInError(null);
     const data = await res.json();
     setSheet(data.sheet);
     setTotals(data.totals);
@@ -144,14 +152,28 @@ export default function HomePage() {
         return;
       }
       const data = await res.json();
-      setSheet(data.sheet);
-      setTotals(data.totals);
+      await refresh();
       pushLog(
         data.duplicate
           ? `Ingest duplicate ignored: ${description}`
           : `iMessage ingest stand-in: ${description}`,
       );
     });
+  }
+
+  async function handleOwnerSignIn() {
+    const secret = (
+      document.getElementById("owner-secret") as HTMLInputElement
+    ).value;
+    setSignInError(null);
+    const ok = await signInOwner(secret);
+    if (!ok) {
+      setSignInError("Invalid owner secret");
+      return;
+    }
+    setNeedsSignIn(false);
+    await refresh();
+    pushLog("Owner signed in");
   }
 
   async function researchPurchase() {
@@ -211,6 +233,29 @@ export default function HomePage() {
         Balance sheet → PayPal sync → iMessage ingest → agent research → human
         approval → sandbox order
       </p>
+
+      {needsSignIn && (
+        <div className="card">
+          <h2>Owner sign-in</h2>
+          <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
+            Enter your <code>FYE_API_SECRET</code> to access balances and owner
+            actions. Bridges use a separate ingest secret and never see the full
+            balance sheet.
+          </p>
+          <label htmlFor="owner-secret">Owner API secret</label>
+          <input
+            id="owner-secret"
+            type="password"
+            autoComplete="current-password"
+          />
+          {signInError && <p className="warn">{signInError}</p>}
+          <p style={{ marginTop: "0.75rem" }}>
+            <button type="button" disabled={loading} onClick={handleOwnerSignIn}>
+              Sign in
+            </button>
+          </p>
+        </div>
+      )}
 
       {totals && (
         <div className="card grid grid-2">

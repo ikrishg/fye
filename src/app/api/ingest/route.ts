@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { netWorthCents, sumAssets, sumLiabilities } from "@/domain/balance-sheet";
+import { buildIngestApiResponse } from "@/ingest/response";
 import { ingestToBalanceLine, parseIngestBody } from "@/ingest/service";
 import { AuthError } from "@/lib/auth";
-import { assertIngestAuth } from "@/lib/auth-server";
+import { assertIngestOrOwnerAuth } from "@/lib/auth-server";
 import { getStore } from "@/store/memory-store";
 
 export const runtime = "nodejs";
@@ -14,7 +14,7 @@ export const runtime = "nodejs";
  */
 export async function POST(request: Request) {
   try {
-    await assertIngestAuth(request);
+    await assertIngestOrOwnerAuth(request);
   } catch (err) {
     if (err instanceof AuthError) {
       return NextResponse.json({ error: err.message }, { status: 401 });
@@ -28,17 +28,7 @@ export async function POST(request: Request) {
     const store = getStore();
     const result = store.addIngestLiability(line);
 
-    const sheet = store.getBalanceSheet();
-    return NextResponse.json({
-      ingested: result.line,
-      duplicate: result.duplicate,
-      sheet,
-      totals: {
-        assetsCents: sumAssets(sheet),
-        liabilitiesCents: sumLiabilities(sheet),
-        netWorthCents: netWorthCents(sheet),
-      },
-    });
+    return NextResponse.json(buildIngestApiResponse(result));
   } catch (err) {
     if (err instanceof ZodError) {
       return NextResponse.json(

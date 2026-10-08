@@ -7,20 +7,28 @@ import type {
 } from "@/paypal/types";
 import { syncPayPalTransactions } from "@/paypal/sync";
 
+const TOTAL_TXNS = 150;
+
 class PagingAdapter implements PayPalAdapter {
   readonly mode = "mock" as const;
+  readonly pagesRequested: number[] = [];
 
   async listTransactions(
     params: PayPalListTransactionsParams,
   ): Promise<PayPalListTransactionsResult> {
     const page = params.page ?? 1;
-    const pageSize = params.pageSize ?? 2;
-    const all: PayPalTransaction[] = Array.from({ length: 5 }, (_, i) => ({
-      transaction_id: `TX-${i}`,
-      transaction_status: "S",
-      transaction_amount: { currency_code: "USD", value: "1.00" },
-      transaction_info: { transaction_subject: `Item ${i}` },
-    }));
+    const pageSize = params.pageSize ?? 100;
+    this.pagesRequested.push(page);
+
+    const all: PayPalTransaction[] = Array.from(
+      { length: TOTAL_TXNS },
+      (_, i) => ({
+        transaction_id: `TX-${i}`,
+        transaction_status: "S",
+        transaction_amount: { currency_code: "USD", value: "1.00" },
+        transaction_info: { transaction_subject: `Item ${i}` },
+      }),
+    );
 
     const start = (page - 1) * pageSize;
     return {
@@ -30,17 +38,22 @@ class PagingAdapter implements PayPalAdapter {
     };
   }
 
-  async createSandboxOrder(): Promise<{ orderId: string; approvalUrl: string }> {
-    return { orderId: "x", approvalUrl: "y" };
+  async createSandboxOrder(input: {
+    idempotencyKey: string;
+  }): Promise<{ orderId: string; approvalUrl: string }> {
+    return { orderId: `order-${input.idempotencyKey}`, approvalUrl: "y" };
   }
 }
 
 describe("PayPal sync pagination", () => {
-  it("fetches every page before mapping", async () => {
-    const lines = await syncPayPalTransactions(new PagingAdapter(), {
+  it("requests later pages when more than 100 transactions exist", async () => {
+    const adapter = new PagingAdapter();
+    const lines = await syncPayPalTransactions(adapter, {
       startDate: "2026-01-01T00:00:00Z",
       endDate: "2026-01-31T23:59:59Z",
     });
-    expect(lines).toHaveLength(5);
+
+    expect(lines).toHaveLength(TOTAL_TXNS);
+    expect(adapter.pagesRequested).toEqual([1, 2]);
   });
 });

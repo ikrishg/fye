@@ -4,6 +4,8 @@ fye P0 does **not** ship a native iMessage extension. Ingest is defined by `POST
 
 ## Ingest contract
 
+**Request**
+
 ```json
 {
   "kind": "transaction" | "receipt",
@@ -13,6 +15,21 @@ fye P0 does **not** ship a native iMessage extension. Ingest is defined by `POST
   "merchant": "optional",
   "rawText": "optional original message body",
   "messageId": "optional stable id for dedupe"
+}
+```
+
+**Response** (no balance sheet or net-worth fields — bridges must not read owner financials)
+
+```json
+{
+  "ingested": {
+    "id": "ingest-msg-…",
+    "name": "receipt: …",
+    "amountCents": 4800,
+    "externalId": "msg-…",
+    "source": "imessage_ingest"
+  },
+  "duplicate": false
 }
 ```
 
