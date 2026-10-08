@@ -84,6 +84,12 @@ npm run mcp:paypal
 
 That process has its own empty proposal store, so `create_order` always refuses there; orders are only created through the app's approve step.
 
+### Pending commitments
+
+When approve creates an order, it's recorded once per order id as a pending commitment. It lowers **Available** (liquid cash minus pending commitments) but not cash or net worth. The approve screen shows the order's approve link; in fixture mode it points at `mock-paypal.invalid`.
+
+A later sync settles the commitment when a `list_transactions` row has `paypal_reference_id` equal to the order id and the same amount. From then on, that synced row counts on the sheet instead. Re-syncing and retrying approve don't settle again or add a second commitment. In fixture mode, each mock order shows up as a fixture capture (`MOCK-CAP-<first 8 chars of proposal id>`) in the next sync, standing in for the buyer paying.
+
 ## Deploy (Vercel)
 
 ```bash
