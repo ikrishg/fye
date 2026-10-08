@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { executeApprovedPurchase } from "@/agent/purchase";
 import type { PurchaseProposal } from "@/domain/types";
+import { connectPayPalMcp } from "@/mcp/paypal/client";
 import { MockPayPalAdapter, resetMockPayPalOrders } from "@/paypal/mock-adapter";
 import { resetStoreForTests } from "@/store/memory-store";
 
@@ -34,24 +35,15 @@ describe("approve idempotency", () => {
   it("returns the same order when approve is called twice", async () => {
     const store = resetStoreForTests();
     store.saveProposal(proposal);
-    const adapter = new MockPayPalAdapter();
+    const paypal = await connectPayPalMcp({ adapter: new MockPayPalAdapter(), store });
     const approval = {
       approved: true,
       approvalToken: proposal.approvalToken,
     };
 
-    const first = await executeApprovedPurchase(
-      store,
-      adapter,
-      proposal.id,
-      approval,
-    );
-    const second = await executeApprovedPurchase(
-      store,
-      adapter,
-      proposal.id,
-      approval,
-    );
+    const first = await executeApprovedPurchase(paypal, store, proposal.id, approval);
+    const second = await executeApprovedPurchase(paypal, store, proposal.id, approval);
+    await paypal.close();
 
     expect(first.paypalOrderId).toBeDefined();
     expect(second.paypalOrderId).toBe(first.paypalOrderId);

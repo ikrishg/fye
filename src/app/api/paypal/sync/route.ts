@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { netWorthCents, sumAssets, sumLiabilities } from "@/domain/balance-sheet";
 import { AuthError } from "@/lib/auth";
 import { assertOwnerAuth } from "@/lib/auth-server";
-import { createPayPalAdapter, paypalAdapterLabel } from "@/paypal/factory";
+import { withPayPalMcp } from "@/mcp/paypal/client";
+import { PAYPAL_MCP_SERVER_NAME } from "@/mcp/paypal/server";
+import { PAYPAL_MCP_TOOLS } from "@/mcp/paypal/tools";
+import { paypalAdapterLabel } from "@/paypal/factory";
 import { mergePayPalLines, syncPayPalTransactions } from "@/paypal/sync";
-import { getStore } from "@/store/memory-store";
 
 export const runtime = "nodejs";
 
@@ -28,7 +30,6 @@ export async function POST(request: Request) {
     throw err;
   }
 
-  const adapter = createPayPalAdapter();
   let range = defaultDateRange();
 
   try {
@@ -40,21 +41,27 @@ export async function POST(request: Request) {
     // empty body ok
   }
 
-  const lines = await syncPayPalTransactions(adapter, range);
-  const store = getStore();
-  const current = store.getBalanceSheet();
-  const merged = mergePayPalLines(current.assets, current.liabilities, lines);
-  store.replacePayPalSync(merged.assets, merged.liabilities);
+  return withPayPalMcp(async (paypal, { adapter, store }) => {
+    const lines = await syncPayPalTransactions(paypal, range);
+    const current = store.getBalanceSheet();
+    const merged = mergePayPalLines(current.assets, current.liabilities, lines);
+    store.replacePayPalSync(merged.assets, merged.liabilities);
 
-  const sheet = store.getBalanceSheet();
-  return NextResponse.json({
-    adapter: paypalAdapterLabel(adapter),
-    syncedCount: lines.length,
-    sheet,
-    totals: {
-      assetsCents: sumAssets(sheet),
-      liabilitiesCents: sumLiabilities(sheet),
-      netWorthCents: netWorthCents(sheet),
-    },
+    const sheet = store.getBalanceSheet();
+    return NextResponse.json({
+      adapter: paypalAdapterLabel(adapter),
+      mcp: {
+        server: PAYPAL_MCP_SERVER_NAME,
+        tool: PAYPAL_MCP_TOOLS.listTransactions,
+        transactionIds: lines.map((l) => l.externalId),
+      },
+      syncedCount: lines.length,
+      sheet,
+      totals: {
+        assetsCents: sumAssets(sheet),
+        liabilitiesCents: sumLiabilities(sheet),
+        netWorthCents: netWorthCents(sheet),
+      },
+    });
   });
 }

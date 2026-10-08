@@ -1,4 +1,5 @@
-import type { PayPalAdapter } from "@/paypal/types";
+import type { PayPalMcpClient } from "@/mcp/paypal/client";
+import type { CreateOrderArgs } from "@/mcp/paypal/tools";
 import type { PurchaseProposal } from "@/domain/types";
 import type { FyeStore } from "@/store/memory-store";
 import { ProposalReserveError } from "@/store/memory-store";
@@ -31,9 +32,34 @@ export function assertHumanApproval(
   }
 }
 
+export function orderArgsForProposal(proposal: PurchaseProposal): CreateOrderArgs {
+  const value = proposal.request.amountCents / 100;
+  return {
+    currencyCode: proposal.request.currency as CreateOrderArgs["currencyCode"],
+    items: [
+      {
+        name: proposal.request.description,
+        quantity: 1,
+        itemCost: value,
+        taxPercent: 0,
+        itemTotal: value,
+      },
+    ],
+    notes: proposal.request.description,
+    fye_approval: {
+      proposal_id: proposal.id,
+      approval_token: proposal.approvalToken,
+    },
+  };
+}
+
+/**
+ * Reserves the proposal (the human approval), then asks the PayPal MCP server
+ * to create the order. The MCP `create_order` tool re-checks the reservation.
+ */
 export async function executeApprovedPurchase(
+  paypal: PayPalMcpClient,
   store: FyeStore,
-  adapter: PayPalAdapter,
   proposalId: string,
   approval: { approved: boolean; approvalToken: string },
 ): Promise<PurchaseProposal> {
@@ -67,25 +93,15 @@ export async function executeApprovedPurchase(
   }
 
   try {
-    const order = await adapter.createSandboxOrder({
-      amountCents: reserved.request.amountCents,
-      currency: reserved.request.currency,
-      description: reserved.request.description,
-      idempotencyKey: reserved.id,
-    });
-
-    const completed: PurchaseProposal = {
-      ...reserved,
-      status: "order_created",
-      paypalOrderId: order.orderId,
-    };
-    store.saveProposal(completed);
-    return completed;
+    await paypal.createOrder(orderArgsForProposal(reserved));
   } catch (err) {
-    store.saveProposal({
-      ...reserved,
-      status: "pending_approval",
-    });
+    store.saveProposal({ ...reserved, status: "pending_approval" });
     throw err;
   }
+
+  const completed = store.getProposal(proposalId);
+  if (!completed) {
+    throw new Error(`Proposal ${proposalId} disappeared after create_order.`);
+  }
+  return completed;
 }

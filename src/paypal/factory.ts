@@ -28,6 +28,6 @@ export function createPayPalAdapter(): PayPalAdapter {
 
 export function paypalAdapterLabel(adapter: PayPalAdapter): string {
   return adapter.mode === "mock"
-    ? "mock (fixture transactions — set PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_ENV=sandbox to swap)"
-    : "sandbox API";
+    ? "mock via fye-paypal MCP (fixture transactions — set PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_ENV=sandbox to swap)"
+    : "sandbox API via fye-paypal MCP";
 }

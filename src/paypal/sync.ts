@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { BalanceSheetLine, PayPalTransaction } from "@/domain/types";
 import { FYE_BASE_CURRENCY } from "@/lib/currency";
-import type { PayPalAdapter } from "./types";
+import type { PayPalMcpClient } from "@/mcp/paypal/client";
 
 /** Map PayPal reporting transaction to a balance-sheet cash line (signed amount in cents). */
 export function mapPayPalTransactionToLine(
@@ -62,7 +62,7 @@ export function mergePayPalLines(
 }
 
 export async function syncPayPalTransactions(
-  adapter: PayPalAdapter,
+  paypal: Pick<PayPalMcpClient, "listTransactions">,
   range: { startDate: string; endDate: string },
 ): Promise<BalanceSheetLine[]> {
   const pageSize = 100;
@@ -71,14 +71,14 @@ export async function syncPayPalTransactions(
   const allTransactions: PayPalTransaction[] = [];
 
   do {
-    const result = await adapter.listTransactions({
-      startDate: range.startDate,
-      endDate: range.endDate,
+    const result = await paypal.listTransactions({
+      start_date: range.startDate,
+      end_date: range.endDate,
       page,
-      pageSize,
+      page_size: pageSize,
     });
-    allTransactions.push(...result.transactions);
-    totalPages = result.totalPages;
+    allTransactions.push(...result.transaction_details);
+    totalPages = result.total_pages;
     page += 1;
   } while (page <= totalPages);
 
