@@ -13,7 +13,7 @@ let adapter: MockPayPalAdapter;
 let paypal: PayPalMcpClient;
 
 function newProposal(amountCents = 299_00): PurchaseProposal {
-  const proposal = createPurchaseProposal(store.getBalanceSheet(), {
+  const proposal = createPurchaseProposal(store.getBalanceSheet(), store.listCommitments(), {
     description: "New headphones",
     amountCents,
     currency: "USD",
