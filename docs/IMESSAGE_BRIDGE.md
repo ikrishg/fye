@@ -28,6 +28,7 @@ fye P0 does **not** ship a native iMessage extension. Ingest is defined by `POST
 
 ## Security
 
+- Send `Authorization: Bearer <FYE_INGEST_SECRET>` (or `FYE_API_SECRET` if ingest secret is unset) on every ingest request.
 - Authenticate webhooks (shared secret header, signed payloads).
 - Treat `rawText` as untrusted input; validate with the same Zod schema as the API.
 - Never auto-create PayPal orders from ingest—only the approval-gated agent path may create orders.

@@ -1,5 +1,6 @@
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import type { BalanceSheetLine, PayPalTransaction } from "@/domain/types";
+import { FYE_BASE_CURRENCY } from "@/lib/currency";
 import type { PayPalAdapter } from "./types";
 
 /** Map PayPal reporting transaction to a balance-sheet cash line (signed amount in cents). */
@@ -7,6 +8,10 @@ export function mapPayPalTransactionToLine(
   txn: PayPalTransaction,
 ): BalanceSheetLine | null {
   if (txn.transaction_status !== "S") {
+    return null;
+  }
+
+  if (txn.transaction_amount.currency_code !== FYE_BASE_CURRENCY) {
     return null;
   }
 
@@ -60,13 +65,25 @@ export async function syncPayPalTransactions(
   adapter: PayPalAdapter,
   range: { startDate: string; endDate: string },
 ): Promise<BalanceSheetLine[]> {
-  const result = await adapter.listTransactions({
-    startDate: range.startDate,
-    endDate: range.endDate,
-  });
+  const pageSize = 100;
+  let page = 1;
+  let totalPages = 1;
+  const allTransactions: PayPalTransaction[] = [];
+
+  do {
+    const result = await adapter.listTransactions({
+      startDate: range.startDate,
+      endDate: range.endDate,
+      page,
+      pageSize,
+    });
+    allTransactions.push(...result.transactions);
+    totalPages = result.totalPages;
+    page += 1;
+  } while (page <= totalPages);
 
   const lines: BalanceSheetLine[] = [];
-  for (const txn of result.transactions) {
+  for (const txn of allTransactions) {
     const line = mapPayPalTransactionToLine(txn);
     if (line) {
       lines.push(line);
@@ -81,8 +98,12 @@ export function mapIngestSpendToLiability(input: {
   description: string;
   messageId?: string;
 }): BalanceSheetLine {
+  const id = input.messageId
+    ? `ingest-${input.messageId}`
+    : `ingest-${randomUUID()}`;
+
   return {
-    id: uuidv4(),
+    id,
     name: input.description,
     amountCents: input.amountCents,
     category: "other_liability",

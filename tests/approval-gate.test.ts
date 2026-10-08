@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { ApprovalGateError, assertHumanApproval, executeApprovedPurchase } from "@/agent/purchase";
+import { describe, expect, it, beforeEach } from "vitest";
+import { ApprovalGateError, executeApprovedPurchase } from "@/agent/purchase";
 import type { PurchaseProposal } from "@/domain/types";
-import { MockPayPalAdapter } from "@/paypal/mock-adapter";
+import { MockPayPalAdapter, resetMockPayPalOrders } from "@/paypal/mock-adapter";
+import { resetStoreForTests } from "@/store/memory-store";
 
 const baseProposal: PurchaseProposal = {
   id: "p1",
@@ -24,39 +25,47 @@ const baseProposal: PurchaseProposal = {
 };
 
 describe("approval gate", () => {
-  it("blocks when not approved", () => {
-    expect(() =>
-      assertHumanApproval(baseProposal, {
+  beforeEach(() => {
+    resetMockPayPalOrders();
+    const store = resetStoreForTests();
+    store.saveProposal(baseProposal);
+  });
+
+  it("blocks when not approved", async () => {
+    const store = resetStoreForTests();
+    store.saveProposal(baseProposal);
+    await expect(
+      executeApprovedPurchase(store, new MockPayPalAdapter(), baseProposal.id, {
         approved: false,
         approvalToken: baseProposal.approvalToken,
       }),
-    ).toThrow(ApprovalGateError);
+    ).rejects.toThrow(ApprovalGateError);
   });
 
-  it("blocks wrong token", () => {
-    expect(() =>
-      assertHumanApproval(baseProposal, {
+  it("blocks wrong token", async () => {
+    const store = resetStoreForTests();
+    store.saveProposal(baseProposal);
+    await expect(
+      executeApprovedPurchase(store, new MockPayPalAdapter(), baseProposal.id, {
         approved: true,
         approvalToken: "00000000-0000-4000-8000-000000000099",
       }),
-    ).toThrow(/token/i);
-  });
-
-  it("blocks already processed proposals", () => {
-    expect(() =>
-      assertHumanApproval(
-        { ...baseProposal, status: "order_created" },
-        { approved: true, approvalToken: baseProposal.approvalToken },
-      ),
-    ).toThrow(/pending/);
+    ).rejects.toThrow(/token/i);
   });
 
   it("creates sandbox order only after approval", async () => {
+    const store = resetStoreForTests();
+    store.saveProposal(baseProposal);
     const adapter = new MockPayPalAdapter();
-    const result = await executeApprovedPurchase(adapter, baseProposal, {
-      approved: true,
-      approvalToken: baseProposal.approvalToken,
-    });
+    const result = await executeApprovedPurchase(
+      store,
+      adapter,
+      baseProposal.id,
+      {
+        approved: true,
+        approvalToken: baseProposal.approvalToken,
+      },
+    );
     expect(result.status).toBe("order_created");
     expect(result.paypalOrderId).toMatch(/^MOCK-ORDER-/);
   });

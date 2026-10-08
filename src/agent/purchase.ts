@@ -1,5 +1,7 @@
 import type { PayPalAdapter } from "@/paypal/types";
 import type { PurchaseProposal } from "@/domain/types";
+import type { FyeStore } from "@/store/memory-store";
+import { ProposalReserveError } from "@/store/memory-store";
 
 export class ApprovalGateError extends Error {
   constructor(message: string) {
@@ -18,7 +20,11 @@ export function assertHumanApproval(
   if (input.approvalToken !== proposal.approvalToken) {
     throw new ApprovalGateError("Invalid approval token.");
   }
-  if (proposal.status !== "pending_approval") {
+  if (
+    proposal.status !== "pending_approval" &&
+    proposal.status !== "creating_order" &&
+    proposal.status !== "order_created"
+  ) {
     throw new ApprovalGateError(
       `Proposal is not pending approval (status=${proposal.status}).`,
     );
@@ -26,21 +32,60 @@ export function assertHumanApproval(
 }
 
 export async function executeApprovedPurchase(
+  store: FyeStore,
   adapter: PayPalAdapter,
-  proposal: PurchaseProposal,
+  proposalId: string,
   approval: { approved: boolean; approvalToken: string },
 ): Promise<PurchaseProposal> {
-  assertHumanApproval(proposal, approval);
+  if (!approval.approved) {
+    throw new ApprovalGateError("Human approval required (approved must be true).");
+  }
 
-  const order = await adapter.createSandboxOrder({
-    amountCents: proposal.request.amountCents,
-    currency: proposal.request.currency,
-    description: proposal.request.description,
-  });
+  const existing = store.getProposal(proposalId);
+  if (!existing) {
+    throw new ApprovalGateError("Proposal not found");
+  }
 
-  return {
-    ...proposal,
-    status: "order_created",
-    paypalOrderId: order.orderId,
-  };
+  if (existing.status === "order_created") {
+    if (approval.approvalToken !== existing.approvalToken) {
+      throw new ApprovalGateError("Invalid approval token.");
+    }
+    return existing;
+  }
+
+  let reserved: PurchaseProposal;
+  try {
+    reserved = store.reserveProposalForOrder(proposalId, approval.approvalToken);
+    if (reserved.status === "order_created") {
+      return reserved;
+    }
+  } catch (err) {
+    if (err instanceof ProposalReserveError) {
+      throw new ApprovalGateError(err.message);
+    }
+    throw err;
+  }
+
+  try {
+    const order = await adapter.createSandboxOrder({
+      amountCents: reserved.request.amountCents,
+      currency: reserved.request.currency,
+      description: reserved.request.description,
+      idempotencyKey: reserved.id,
+    });
+
+    const completed: PurchaseProposal = {
+      ...reserved,
+      status: "order_created",
+      paypalOrderId: order.orderId,
+    };
+    store.saveProposal(completed);
+    return completed;
+  } catch (err) {
+    store.saveProposal({
+      ...reserved,
+      status: "pending_approval",
+    });
+    throw err;
+  }
 }

@@ -59,6 +59,7 @@ export interface PurchaseResearchRequest {
 
 export type PurchaseProposalStatus =
   | "pending_approval"
+  | "creating_order"
   | "approved"
   | "rejected"
   | "order_created";

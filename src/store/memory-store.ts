@@ -4,16 +4,32 @@ import type {
   PurchaseProposal,
 } from "@/domain/types";
 
+export class ProposalReserveError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProposalReserveError";
+  }
+}
+
+export interface IngestResult {
+  line: BalanceSheetLine;
+  duplicate: boolean;
+}
+
 export interface FyeStore {
   getBalanceSheet(): BalanceSheet;
   setBalanceSheet(sheet: BalanceSheet): void;
   addManualAsset(line: BalanceSheetLine): void;
   addManualLiability(line: BalanceSheetLine): void;
-  addIngestLiability(line: BalanceSheetLine): void;
+  addIngestLiability(line: BalanceSheetLine): IngestResult;
   replacePayPalSync(assets: BalanceSheetLine[], liabilities: BalanceSheetLine[]): void;
   getProposal(id: string): PurchaseProposal | undefined;
   saveProposal(proposal: PurchaseProposal): void;
   listProposals(): PurchaseProposal[];
+  reserveProposalForOrder(
+    id: string,
+    approvalToken: string,
+  ): PurchaseProposal;
 }
 
 const defaultSheet: BalanceSheet = {
@@ -46,6 +62,15 @@ function cloneSheet(sheet: BalanceSheet): BalanceSheet {
   };
 }
 
+function findIngestByExternalId(
+  sheet: BalanceSheet,
+  externalId: string,
+): BalanceSheetLine | undefined {
+  return sheet.liabilities.find(
+    (l) => l.source === "imessage_ingest" && l.externalId === externalId,
+  );
+}
+
 export function createMemoryStore(): FyeStore {
   let sheet = cloneSheet(defaultSheet);
   const proposals = new Map<string, PurchaseProposal>();
@@ -62,7 +87,14 @@ export function createMemoryStore(): FyeStore {
       sheet.liabilities.push(line);
     },
     addIngestLiability(line) {
+      if (line.externalId) {
+        const existing = findIngestByExternalId(sheet, line.externalId);
+        if (existing) {
+          return { line: existing, duplicate: true };
+        }
+      }
       sheet.liabilities.push(line);
+      return { line, duplicate: false };
     },
     replacePayPalSync(assets, liabilities) {
       sheet = {
@@ -80,6 +112,32 @@ export function createMemoryStore(): FyeStore {
       return [...proposals.values()].sort(
         (a, b) => b.createdAt.localeCompare(a.createdAt),
       );
+    },
+    reserveProposalForOrder(id, approvalToken) {
+      const proposal = proposals.get(id);
+      if (!proposal) {
+        throw new ProposalReserveError("Proposal not found");
+      }
+      if (proposal.approvalToken !== approvalToken) {
+        throw new ProposalReserveError("Invalid approval token");
+      }
+      if (proposal.status === "order_created") {
+        return proposal;
+      }
+      if (proposal.status === "creating_order") {
+        throw new ProposalReserveError("Order creation already in progress");
+      }
+      if (proposal.status !== "pending_approval") {
+        throw new ProposalReserveError(
+          `Proposal is not pending approval (status=${proposal.status})`,
+        );
+      }
+      const reserved: PurchaseProposal = {
+        ...proposal,
+        status: "creating_order",
+      };
+      proposals.set(id, reserved);
+      return reserved;
     },
   };
 }

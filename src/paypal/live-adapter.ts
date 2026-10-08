@@ -1,4 +1,5 @@
 import type { PayPalTransaction } from "@/domain/types";
+import { normalizePayPalTransaction } from "./normalize";
 import type {
   PayPalAdapter,
   PayPalEnvConfig,
@@ -89,7 +90,9 @@ export class LivePayPalAdapter implements PayPalAdapter {
     };
 
     const transactions =
-      data.transaction_details?.map((d) => d.transaction_info) ?? [];
+      data.transaction_details?.map((d) =>
+        normalizePayPalTransaction(d.transaction_info),
+      ) ?? [];
 
     return {
       transactions,
@@ -102,6 +105,7 @@ export class LivePayPalAdapter implements PayPalAdapter {
     amountCents: number;
     currency: string;
     description: string;
+    idempotencyKey: string;
   }): Promise<{ orderId: string; approvalUrl: string }> {
     const token = await getAccessToken(this.config);
     const value = (input.amountCents / 100).toFixed(2);
@@ -113,6 +117,7 @@ export class LivePayPalAdapter implements PayPalAdapter {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          "PayPal-Request-Id": input.idempotencyKey,
         },
         body: JSON.stringify({
           intent: "CAPTURE",

@@ -3,7 +3,7 @@
  * CLI stand-in for iMessage → fye ingest (calls same API contract as webhook).
  *
  * Usage:
- *   FYE_BASE_URL=http://localhost:3000 npm run ingest -- --amount 48 --desc "Dinner"
+ *   FYE_BASE_URL=http://localhost:3000 FYE_INGEST_SECRET=dev-insecure-fye-secret npm run ingest -- --amount 48 --desc "Dinner"
  */
 
 const args = process.argv.slice(2);
@@ -16,8 +16,13 @@ function getArg(name: string): string | undefined {
 
 async function main() {
   const base = process.env.FYE_BASE_URL ?? "http://localhost:3000";
+  const ingestSecret =
+    process.env.FYE_INGEST_SECRET ??
+    process.env.FYE_API_SECRET ??
+    "dev-insecure-fye-secret";
   const amountStr = getArg("amount") ?? "25";
   const desc = getArg("desc") ?? "Coffee receipt";
+  const messageId = getArg("messageId") ?? `cli-${Date.now()}`;
   const amountCents = Math.round(parseFloat(amountStr) * 100);
 
   const payload = {
@@ -26,12 +31,15 @@ async function main() {
     currency: "USD",
     description: desc,
     merchant: "cli",
-    messageId: `cli-${Date.now()}`,
+    messageId,
   };
 
   const res = await fetch(`${base}/api/ingest`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${ingestSecret}`,
+    },
     body: JSON.stringify(payload),
   });
 

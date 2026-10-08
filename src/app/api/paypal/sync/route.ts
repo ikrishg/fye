@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { netWorthCents, sumAssets, sumLiabilities } from "@/domain/balance-sheet";
+import { AuthError } from "@/lib/auth";
+import { assertOwnerAuth } from "@/lib/auth-server";
 import { createPayPalAdapter, paypalAdapterLabel } from "@/paypal/factory";
 import { mergePayPalLines, syncPayPalTransactions } from "@/paypal/sync";
 import { getStore } from "@/store/memory-store";
-import { netWorthCents, sumAssets, sumLiabilities } from "@/domain/balance-sheet";
 
 export const runtime = "nodejs";
 
@@ -17,6 +19,15 @@ function defaultDateRange(): { startDate: string; endDate: string } {
 }
 
 export async function POST(request: Request) {
+  try {
+    await assertOwnerAuth(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: 401 });
+    }
+    throw err;
+  }
+
   const adapter = createPayPalAdapter();
   let range = defaultDateRange();
 

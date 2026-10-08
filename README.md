@@ -17,6 +17,17 @@ This demo is intentionally **not** a Zapier → PayPal pipe. Step 4 shows the ag
 
 **Out of scope:** bank/card sync beyond PayPal, Bill Split REST, Agent Ready/ACP, hands-off spending.
 
+## Auth (owner + ingest)
+
+| Variable | Purpose |
+|----------|---------|
+| `FYE_API_SECRET` | Owner API key (`Authorization: Bearer …` or `fye_session` cookie) for balance sheet, PayPal sync, and purchase routes |
+| `FYE_INGEST_SECRET` | Optional separate secret for `POST /api/ingest` (defaults to `FYE_API_SECRET`) |
+
+In development, if `FYE_API_SECRET` is unset, the app uses `dev-insecure-fye-secret` and the UI auto-establishes a session. **Set `FYE_API_SECRET` in production.**
+
+`GET /api/agent/purchase` returns proposals **without** `approvalToken`. Tokens are returned only from `POST /api/agent/purchase` (create) and must be supplied to approve.
+
 ## Run locally
 
 ```bash

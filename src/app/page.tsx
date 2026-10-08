@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { withLoadingFlag } from "@/lib/loading";
+import { ensureOwnerSession, ownerFetch } from "@/lib/owner-fetch";
 
 interface Totals {
   assetsCents: number;
@@ -53,7 +55,12 @@ export default function HomePage() {
     setLog((prev) => [`${new Date().toLocaleTimeString()} — ${msg}`, ...prev].slice(0, 12));
 
   const refresh = useCallback(async () => {
-    const res = await fetch("/api/balance-sheet");
+    await ensureOwnerSession();
+    const res = await ownerFetch("/api/balance-sheet");
+    if (!res.ok) {
+      pushLog(`Balance sheet load failed (${res.status})`);
+      return;
+    }
     const data = await res.json();
     setSheet(data.sheet);
     setTotals(data.totals);
@@ -73,33 +80,42 @@ export default function HomePage() {
     const category = (
       document.getElementById(`${side}-category`) as HTMLSelectElement
     ).value;
-    setLoading(true);
-    const res = await fetch("/api/balance-sheet", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        side,
-        name,
-        amountCents: Math.round(amount * 100),
-        category,
-      }),
+    await withLoadingFlag(setLoading, async () => {
+      const res = await ownerFetch("/api/balance-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          side,
+          name,
+          amountCents: Math.round(amount * 100),
+          category,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        pushLog(`Add ${side} failed: ${err.error ?? res.status}`);
+        return;
+      }
+      const data = await res.json();
+      setSheet(data.sheet);
+      setTotals(data.totals);
+      pushLog(`Added manual ${side}: ${name}`);
     });
-    const data = await res.json();
-    setSheet(data.sheet);
-    setTotals(data.totals);
-    pushLog(`Added manual ${side}: ${name}`);
-    setLoading(false);
   }
 
   async function syncPayPal() {
-    setLoading(true);
-    const res = await fetch("/api/paypal/sync", { method: "POST" });
-    const data = await res.json();
-    setSheet(data.sheet);
-    setTotals(data.totals);
-    setAdapterLabel(data.adapter);
-    pushLog(`PayPal sync: ${data.syncedCount} transactions (${data.adapter})`);
-    setLoading(false);
+    await withLoadingFlag(setLoading, async () => {
+      const res = await ownerFetch("/api/paypal/sync", { method: "POST" });
+      if (!res.ok) {
+        pushLog(`PayPal sync failed (${res.status})`);
+        return;
+      }
+      const data = await res.json();
+      setSheet(data.sheet);
+      setTotals(data.totals);
+      setAdapterLabel(data.adapter);
+      pushLog(`PayPal sync: ${data.syncedCount} transactions (${data.adapter})`);
+    });
   }
 
   async function ingestMessage() {
@@ -109,24 +125,33 @@ export default function HomePage() {
     const amount = Number(
       (document.getElementById("ingest-amount") as HTMLInputElement).value,
     );
-    setLoading(true);
-    const res = await fetch("/api/ingest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        kind: "receipt",
-        amountCents: Math.round(amount * 100),
-        currency: "USD",
-        description,
-        merchant: "iMessage",
-        messageId: `msg-${Date.now()}`,
-      }),
+    await withLoadingFlag(setLoading, async () => {
+      const res = await ownerFetch("/api/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "receipt",
+          amountCents: Math.round(amount * 100),
+          currency: "USD",
+          description,
+          merchant: "iMessage",
+          messageId: `msg-${Date.now()}`,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        pushLog(`Ingest failed: ${err.error ?? res.status}`);
+        return;
+      }
+      const data = await res.json();
+      setSheet(data.sheet);
+      setTotals(data.totals);
+      pushLog(
+        data.duplicate
+          ? `Ingest duplicate ignored: ${description}`
+          : `iMessage ingest stand-in: ${description}`,
+      );
     });
-    const data = await res.json();
-    setSheet(data.sheet);
-    setTotals(data.totals);
-    pushLog(`iMessage ingest stand-in: ${description}`);
-    setLoading(false);
   }
 
   async function researchPurchase() {
@@ -136,41 +161,47 @@ export default function HomePage() {
     const amount = Number(
       (document.getElementById("purchase-amount") as HTMLInputElement
       ).value);
-    setLoading(true);
-    const res = await fetch("/api/agent/purchase", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        description,
-        amountCents: Math.round(amount * 100),
-        currency: "USD",
-      }),
+    await withLoadingFlag(setLoading, async () => {
+      const res = await ownerFetch("/api/agent/purchase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          description,
+          amountCents: Math.round(amount * 100),
+          currency: "USD",
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        pushLog(`Research failed: ${err.error ?? res.status}`);
+        return;
+      }
+      const data = await res.json();
+      setProposal(data.proposal);
+      pushLog("Agent researched purchase against balances");
     });
-    const data = await res.json();
-    setProposal(data.proposal);
-    pushLog("Agent researched purchase against balances");
-    setLoading(false);
   }
 
   async function approvePurchase() {
     if (!proposal) return;
-    setLoading(true);
-    const res = await fetch(`/api/agent/purchase/${proposal.id}/approve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        approved: true,
-        approvalToken: proposal.approvalToken,
-      }),
+    const token = proposal.approvalToken;
+    await withLoadingFlag(setLoading, async () => {
+      const res = await ownerFetch(`/api/agent/purchase/${proposal.id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          approved: true,
+          approvalToken: token,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setProposal({ ...data.proposal, approvalToken: token });
+        pushLog(`PayPal sandbox order created: ${data.proposal.paypalOrderId}`);
+      } else {
+        pushLog(`Approval blocked: ${data.error}`);
+      }
     });
-    const data = await res.json();
-    if (res.ok) {
-      setProposal(data.proposal);
-      pushLog(`PayPal sandbox order created: ${data.proposal.paypalOrderId}`);
-    } else {
-      pushLog(`Approval blocked: ${data.error}`);
-    }
-    setLoading(false);
   }
 
   return (

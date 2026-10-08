@@ -1,11 +1,12 @@
 import { z } from "zod";
 import type { IngestPayload } from "@/domain/types";
+import { FYE_BASE_CURRENCY } from "@/lib/currency";
 import { mapIngestSpendToLiability } from "@/paypal/sync";
 
 export const ingestPayloadSchema = z.object({
   kind: z.enum(["transaction", "receipt"]),
   amountCents: z.number().int().positive(),
-  currency: z.string().min(3).max(3),
+  currency: z.literal(FYE_BASE_CURRENCY),
   description: z.string().min(1),
   merchant: z.string().optional(),
   rawText: z.string().optional(),

@@ -19,17 +19,29 @@ function normalizeFixture(): PayPalTransaction[] {
   }));
 }
 
+const allFixtureTxns = normalizeFixture();
+const ordersByIdempotencyKey = new Map<
+  string,
+  { orderId: string; approvalUrl: string }
+>();
+
 export class MockPayPalAdapter implements PayPalAdapter {
   readonly mode = "mock";
 
   async listTransactions(
-    _params: PayPalListTransactionsParams,
+    params: PayPalListTransactionsParams,
   ): Promise<PayPalListTransactionsResult> {
-    const transactions = normalizeFixture();
+    const pageSize = params.pageSize ?? 100;
+    const page = params.page ?? 1;
+    const totalItems = allFixtureTxns.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    const start = (page - 1) * pageSize;
+    const transactions = allFixtureTxns.slice(start, start + pageSize);
+
     return {
       transactions,
-      totalItems: fixture.total_items,
-      totalPages: fixture.total_pages,
+      totalItems,
+      totalPages,
     };
   }
 
@@ -37,12 +49,24 @@ export class MockPayPalAdapter implements PayPalAdapter {
     amountCents: number;
     currency: string;
     description: string;
+    idempotencyKey: string;
   }): Promise<{ orderId: string; approvalUrl: string }> {
-    const orderId = `MOCK-ORDER-${Date.now()}`;
+    const cached = ordersByIdempotencyKey.get(input.idempotencyKey);
+    if (cached) {
+      return cached;
+    }
+
+    const orderId = `MOCK-ORDER-${input.idempotencyKey.slice(0, 8)}`;
     const value = (input.amountCents / 100).toFixed(2);
-    return {
+    const result = {
       orderId,
       approvalUrl: `https://www.sandbox.paypal.com/checkoutnow?token=MOCK&amount=${value}&currency=${input.currency}&desc=${encodeURIComponent(input.description)}`,
     };
+    ordersByIdempotencyKey.set(input.idempotencyKey, result);
+    return result;
   }
+}
+
+export function resetMockPayPalOrders(): void {
+  ordersByIdempotencyKey.clear();
 }

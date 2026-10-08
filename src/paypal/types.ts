@@ -22,6 +22,7 @@ export interface PayPalAdapter {
     amountCents: number;
     currency: string;
     description: string;
+    idempotencyKey: string;
   }): Promise<{ orderId: string; approvalUrl: string }>;
 }
 
