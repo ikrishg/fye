@@ -11,9 +11,9 @@ This demo is intentionally **not** a Zapier → PayPal pipe. Step 4 shows the ag
 ## P0 loop (Nov 12 acceptance)
 
 1. **Personal balance sheet** — manual assets & liabilities; net worth on dashboard (`/api/balance-sheet`).
-2. **PayPal sync** — MCP `list_transactions` / `/v1/reporting/transactions` via `PayPalAdapter` → balance sheet lines (`POST /api/paypal/sync`).
+2. **PayPal sync** — MCP `list_transactions` / `/v1/reporting/transactions` via `PayPalAdapter` → signed cash lines (`POST /api/paypal/sync`). Inflows add cash; settled outflows are cash that left (negative), never liabilities. Liabilities hold only real debts.
 3. **Fye on iMessage** — ingest interface with webhook (`POST /api/ingest`) and CLI (`npm run ingest`). Real iMessage bridging is platform-specific; see [docs/IMESSAGE_BRIDGE.md](docs/IMESSAGE_BRIDGE.md).
-4. **Purchase agent** — `POST /api/agent/purchase` researches against current balances; `POST /api/agent/purchase/:id/approve` creates a PayPal **sandbox** order only after human approval.
+4. **Purchase agent** — `POST /api/agent/purchase` researches against Available (liquid cash minus pending commitments); `POST /api/agent/purchase/:id/approve` creates a PayPal **sandbox** order only after human approval.
 
 **Out of scope:** bank/card sync beyond PayPal, Bill Split REST, Agent Ready/ACP, hands-off spending.
 
@@ -88,7 +88,7 @@ That process has its own empty proposal store, so `create_order` always refuses 
 
 When approve creates an order, it's recorded once per order id as a pending commitment. It lowers **Available** (liquid cash minus pending commitments) but not cash or net worth. The approve screen shows the order's approve link; in fixture mode it points at `mock-paypal.invalid`.
 
-A later sync settles the commitment when a `list_transactions` row has `paypal_reference_id` equal to the order id and the same amount. From then on, that synced row counts on the sheet instead. Re-syncing and retrying approve don't settle again or add a second commitment. In fixture mode, each mock order shows up as a fixture capture (`MOCK-CAP-<first 8 chars of proposal id>`) in the next sync, standing in for the buyer paying.
+A later sync settles the commitment when a `list_transactions` outflow has `paypal_reference_id` equal to the order id and the same amount. The commitment clears and the synced outflow takes the money off cash instead, so Available doesn't change on settle; net worth drops then. Pending commitments are listed with liabilities on the sheet but don't count toward the liabilities total or net worth. Re-syncing and retrying approve don't settle again or add a second commitment. In fixture mode, each mock order shows up as a fixture capture (`MOCK-CAP-<first 8 chars of proposal id>`) in the next sync, standing in for the buyer paying.
 
 ## Deploy (Vercel)
 
