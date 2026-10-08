@@ -8,7 +8,11 @@ import { FYE_BASE_CURRENCY } from "@/lib/currency";
 import type { PayPalMcpClient } from "@/mcp/paypal/client";
 import type { FyeStore } from "@/store/memory-store";
 
-/** Map PayPal reporting transaction to a balance-sheet cash line (signed amount in cents). */
+/**
+ * Map a PayPal reporting transaction to a cash line with a signed amount in
+ * cents: inflows add cash, settled outflows are cash that left (negative),
+ * never a liability.
+ */
 export function mapPayPalTransactionToLine(
   txn: PayPalTransaction,
 ): BalanceSheetLine | null {
@@ -39,8 +43,8 @@ export function mapPayPalTransactionToLine(
   return {
     id: `paypal-${txn.transaction_id}`,
     name,
-    amountCents: Math.abs(amountCents),
-    category: amountCents >= 0 ? "cash" : "other_liability",
+    amountCents,
+    category: "cash",
     source: "paypal_sync",
     externalId: txn.transaction_id,
     ...(txn.transaction_info?.paypal_reference_id

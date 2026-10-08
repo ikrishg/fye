@@ -1,5 +1,4 @@
 import {
-  isLiabilityCategory,
   netWorthCents,
   sumAssets,
   sumLiabilities,
@@ -31,7 +30,10 @@ export interface BalanceTotals {
   availableCents: number;
 }
 
-/** Pending commitments only reduce `availableCents`; cash and net worth ignore them. */
+/**
+ * Pending commitments only reduce `availableCents`; cash, liabilities and net
+ * worth ignore them until the capture settles them as cash leaving.
+ */
 export function balanceTotals(
   sheet: BalanceSheet,
   commitments: PendingCommitment[],
@@ -49,8 +51,8 @@ export function balanceTotals(
 }
 
 /**
- * The synced PayPal outflow that captures this commitment's order: same order
- * reference and same amount.
+ * The synced PayPal outflow (a negative cash line) that captures this
+ * commitment's order: same order reference and the same amount.
  */
 export function findSettlingLine(
   commitment: PendingCommitment,
@@ -59,8 +61,8 @@ export function findSettlingLine(
   return lines.find(
     (line) =>
       line.source === "paypal_sync" &&
-      isLiabilityCategory(line.category) &&
+      line.category === "cash" &&
       line.orderReference === commitment.orderId &&
-      line.amountCents === commitment.amountCents,
+      line.amountCents === -commitment.amountCents,
   );
 }

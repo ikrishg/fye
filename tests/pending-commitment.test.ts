@@ -84,32 +84,56 @@ describe("pending commitment on approve", () => {
     expect(totals(store).pendingCommitmentsCents).toBe(299_00);
   });
 
-  it("settles the commitment when list_transactions returns the matching capture", async () => {
+  it("settles on the matching capture: cash drops by the order and Available stays put", async () => {
+    // Seed: Checking $2500.00 cash, Credit card $450.00 debt.
+    await applyPayPalSync(paypal, store, range);
+    // Fixtures: +450.00 in, -12.50 and -9.99 out, all on cash.
+    expect(totals(store)).toEqual({
+      assetsCents: 2927_51,
+      liabilitiesCents: 450_00,
+      netWorthCents: 2477_51,
+      liquidCashCents: 2927_51,
+      pendingCommitmentsCents: 0,
+      availableCents: 2927_51,
+    });
+
     await executeApprovedPurchase(paypal, store, proposal.id, approval);
-    const beforeSync = totals(store);
+    const afterApprove = totals(store);
+    expect(afterApprove).toEqual({
+      assetsCents: 2927_51,
+      liabilitiesCents: 450_00,
+      netWorthCents: 2477_51,
+      liquidCashCents: 2927_51,
+      pendingCommitmentsCents: 299_00,
+      availableCents: 2628_51,
+    });
 
     const { settledCommitments } = await applyPayPalSync(paypal, store, range);
 
     expect(settledCommitments).toEqual([
       expect.objectContaining({ orderId, status: "settled", settledByTransactionId: captureId }),
     ]);
-    const captureRows = store
-      .getBalanceSheet()
-      .liabilities.filter((l) => l.externalId === captureId);
-    expect(captureRows).toEqual([
+    const sheet = store.getBalanceSheet();
+    expect(sheet.assets.filter((l) => l.externalId === captureId)).toEqual([
       expect.objectContaining({
         source: "paypal_sync",
+        category: "cash",
         orderReference: orderId,
-        amountCents: 299_00,
+        amountCents: -299_00,
       }),
     ]);
+    expect(sheet.liabilities.map((l) => l.name)).toEqual(["Credit card balance"]);
 
-    const after = totals(store);
-    expect(after.pendingCommitmentsCents).toBe(0);
-    expect(after.availableCents).toBe(after.liquidCashCents);
-    // Fixture rows: +450.00 cash, -12.50 and -9.99 outflows; then the -299.00 capture.
-    expect(after.liquidCashCents).toBe(beforeSync.liquidCashCents + 450_00);
-    expect(after.netWorthCents).toBe(beforeSync.netWorthCents + 450_00 - 12_50 - 9_99 - 299_00);
+    const afterSettle = totals(store);
+    expect(afterSettle).toEqual({
+      assetsCents: 2628_51,
+      liabilitiesCents: 450_00,
+      netWorthCents: 2178_51,
+      liquidCashCents: 2628_51,
+      pendingCommitmentsCents: 0,
+      availableCents: 2628_51,
+    });
+    expect(afterSettle.availableCents).toBe(afterApprove.availableCents);
   });
 
   it("does not settle or double-count on a second sync", async () => {
@@ -124,7 +148,7 @@ describe("pending commitment on approve", () => {
     expect(store.listCommitments()).toEqual([firstCommitment]);
     expect(totals(store)).toEqual(firstTotals);
     expect(
-      store.getBalanceSheet().liabilities.filter((l) => l.externalId === captureId),
+      store.getBalanceSheet().assets.filter((l) => l.externalId === captureId),
     ).toHaveLength(1);
   });
 
@@ -172,6 +196,24 @@ describe("available vs cash math", () => {
     ...over,
   });
 
+  it("counts settled outflows off cash and keeps liabilities to real debts", () => {
+    const withOutflow: BalanceSheet = {
+      ...sheet,
+      assets: [
+        ...sheet.assets,
+        { id: "o1", name: "PayPal out: Coffee", amountCents: -12_50, category: "cash", source: "paypal_sync", updatedAt: "" },
+      ],
+    };
+    expect(balanceTotals(withOutflow, [])).toEqual({
+      assetsCents: 1487_50,
+      liabilitiesCents: 200_00,
+      netWorthCents: 1287_50,
+      liquidCashCents: 987_50,
+      pendingCommitmentsCents: 0,
+      availableCents: 987_50,
+    });
+  });
+
   it("subtracts only pending commitments from liquid cash", () => {
     const result = balanceTotals(sheet, [
       commitment({ id: "c1", amountCents: 300_00 }),
@@ -191,8 +233,8 @@ describe("available vs cash math", () => {
     const line = {
       id: "paypal-CAP",
       name: "PayPal out: x",
-      amountCents: 300_00,
-      category: "other_liability" as const,
+      amountCents: -300_00,
+      category: "cash" as const,
       source: "paypal_sync" as const,
       externalId: "CAP",
       orderReference: "ORDER-1",
@@ -200,7 +242,8 @@ describe("available vs cash math", () => {
     };
     const c = commitment({});
     expect(findSettlingLine(c, [line])).toBe(line);
-    expect(findSettlingLine(c, [{ ...line, amountCents: 299_99 }])).toBeUndefined();
+    expect(findSettlingLine(c, [{ ...line, amountCents: -299_99 }])).toBeUndefined();
+    expect(findSettlingLine(c, [{ ...line, amountCents: 300_00 }])).toBeUndefined();
     expect(findSettlingLine(c, [{ ...line, orderReference: "ORDER-2" }])).toBeUndefined();
     expect(findSettlingLine(c, [{ ...line, orderReference: undefined }])).toBeUndefined();
     expect(findSettlingLine(c, [{ ...line, source: "manual" }])).toBeUndefined();

@@ -51,7 +51,8 @@ interface Proposal {
 }
 
 function money(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
+  const sign = cents < 0 ? "-" : "";
+  return `${sign}$${(Math.abs(cents) / 100).toFixed(2)}`;
 }
 
 function isMockApprovalUrl(href: string): boolean {
@@ -366,7 +367,7 @@ export default function HomePage() {
               {sheet.assets.map((l) => (
                 <tr key={l.id}>
                   <td>{l.name}</td>
-                  <td>Asset</td>
+                  <td>{l.amountCents < 0 ? "Cash out" : "Asset"}</td>
                   <td><span className="tag">{l.source}</span></td>
                   <td>{money(l.amountCents)}</td>
                 </tr>

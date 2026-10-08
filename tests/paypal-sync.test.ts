@@ -20,7 +20,7 @@ describe("PayPal sync mapping", () => {
     expect(line?.source).toBe("paypal_sync");
   });
 
-  it("maps settled outflow to liability tracking line", () => {
+  it("maps settled outflow to a negative cash line, not a liability", () => {
     const txn: PayPalTransaction = {
       transaction_id: "T-OUT",
       transaction_status: "S",
@@ -28,8 +28,22 @@ describe("PayPal sync mapping", () => {
       transaction_info: { transaction_subject: "Coffee" },
     };
     const line = mapPayPalTransactionToLine(txn);
-    expect(line?.category).toBe("other_liability");
-    expect(line?.amountCents).toBe(12_50);
+    expect(line?.category).toBe("cash");
+    expect(line?.amountCents).toBe(-12_50);
+    expect(line?.name).toBe("PayPal out: Coffee");
+  });
+
+  it("puts every synced row, in or out, on the asset (cash) side", () => {
+    const lines = ["50.00", "-12.50"].map((value, i) =>
+      mapPayPalTransactionToLine({
+        transaction_id: `T-${i}`,
+        transaction_status: "S",
+        transaction_amount: { currency_code: "USD", value },
+      }),
+    );
+    const merged = mergePayPalLines([], [], lines.filter((l) => l !== null));
+    expect(merged.liabilities).toEqual([]);
+    expect(merged.assets.map((a) => a.amountCents)).toEqual([50_00, -12_50]);
   });
 
   it("skips non-settled transactions", () => {
