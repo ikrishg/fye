@@ -17,6 +17,10 @@ This demo is intentionally **not** a Zapier → PayPal pipe. Step 4 shows the ag
 
 **Out of scope:** bank/card sync beyond PayPal, Bill Split REST, Agent Ready/ACP, hands-off spending.
 
+## Data
+
+By default fye keeps everything in memory, so a restart loses it. Set `FYE_DATA_FILE` to a path to keep the balance sheet and purchase proposals in a JSON file instead. This suits one long-running server, not serverless hosts. It stands in until a real database is chosen.
+
 ## Auth (owner + ingest)
 
 | Variable | Purpose |
