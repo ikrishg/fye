@@ -3,6 +3,8 @@ import type {
   BalanceSheetLine,
   PurchaseProposal,
 } from "@/domain/types";
+// file-store imports createMemoryStore back; both are only called at runtime, so the cycle is safe.
+import { createFileStore } from "@/store/file-store";
 
 export class ProposalReserveError extends Error {
   constructor(message: string) {
@@ -152,8 +154,6 @@ export function getStore(): FyeStore {
   if (!globalStore) {
     const file = process.env.FYE_DATA_FILE;
     if (file) {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { createFileStore } = require("./file-store") as typeof import("./file-store");
       globalStore = createFileStore(file);
     } else {
       globalStore = createMemoryStore();
