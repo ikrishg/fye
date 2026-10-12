@@ -144,9 +144,20 @@ export function createMemoryStore(): FyeStore {
 
 let globalStore: FyeStore | null = null;
 
+/**
+ * FYE_DATA_FILE set: state persists to that JSON file (see file-store.ts).
+ * Unset: in-memory, lost on restart.
+ */
 export function getStore(): FyeStore {
   if (!globalStore) {
-    globalStore = createMemoryStore();
+    const file = process.env.FYE_DATA_FILE;
+    if (file) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { createFileStore } = require("./file-store") as typeof import("./file-store");
+      globalStore = createFileStore(file);
+    } else {
+      globalStore = createMemoryStore();
+    }
   }
   return globalStore;
 }
