@@ -9,14 +9,16 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "ingest": "tsx scripts/ingest-cli.ts"
+    "ingest": "tsx scripts/ingest-cli.ts",
+    "mcp:paypal": "tsx scripts/paypal-mcp-stdio.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "uuid": "^11.0.3",
-    "zod": "^3.24.1"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

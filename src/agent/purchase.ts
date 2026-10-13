@@ -1,4 +1,5 @@
-import type { PayPalAdapter } from "@/paypal/types";
+import type { PayPalMcpClient } from "@/mcp/paypal/client";
+import { orderIdempotencyKey, type CreateOrderArgs } from "@/mcp/paypal/tools";
 import type { PurchaseProposal } from "@/domain/types";
 import type { FyeStore } from "@/store/memory-store";
 import { ProposalReserveError } from "@/store/memory-store";
@@ -23,7 +24,8 @@ export function assertHumanApproval(
   if (
     proposal.status !== "pending_approval" &&
     proposal.status !== "creating_order" &&
-    proposal.status !== "order_created"
+    proposal.status !== "order_created" &&
+    proposal.status !== "settled"
   ) {
     throw new ApprovalGateError(
       `Proposal is not pending approval (status=${proposal.status}).`,
@@ -31,9 +33,38 @@ export function assertHumanApproval(
   }
 }
 
+export function orderArgsForProposal(proposal: PurchaseProposal): CreateOrderArgs {
+  const value = proposal.request.amountCents / 100;
+  return {
+    currencyCode: proposal.request.currency as CreateOrderArgs["currencyCode"],
+    items: [
+      {
+        name: proposal.request.description,
+        quantity: 1,
+        itemCost: value,
+        taxPercent: 0,
+        itemTotal: value,
+      },
+    ],
+    notes: proposal.request.description,
+    idempotencyKey: orderIdempotencyKey(proposal.id),
+    fye_approval: {
+      proposal_id: proposal.id,
+      approval_token: proposal.approvalToken,
+    },
+  };
+}
+
+/**
+ * Reserves the proposal (the human approval), then asks the PayPal MCP server
+ * to create the order. The MCP `create_order` tool re-checks the reservation.
+ * Retrying an approved proposal replays create_order with the same
+ * idempotency key, so it returns the original order instead of a new one.
+ * The order is recorded as a pending commitment, once per order id.
+ */
 export async function executeApprovedPurchase(
+  paypal: PayPalMcpClient,
   store: FyeStore,
-  adapter: PayPalAdapter,
   proposalId: string,
   approval: { approved: boolean; approvalToken: string },
 ): Promise<PurchaseProposal> {
@@ -41,24 +72,9 @@ export async function executeApprovedPurchase(
     throw new ApprovalGateError("Human approval required (approved must be true).");
   }
 
-  const existing = store.getProposal(proposalId);
-  if (!existing) {
-    throw new ApprovalGateError("Proposal not found");
-  }
-
-  if (existing.status === "order_created") {
-    if (approval.approvalToken !== existing.approvalToken) {
-      throw new ApprovalGateError("Invalid approval token.");
-    }
-    return existing;
-  }
-
   let reserved: PurchaseProposal;
   try {
     reserved = store.reserveProposalForOrder(proposalId, approval.approvalToken);
-    if (reserved.status === "order_created") {
-      return reserved;
-    }
   } catch (err) {
     if (err instanceof ProposalReserveError) {
       throw new ApprovalGateError(err.message);
@@ -67,25 +83,24 @@ export async function executeApprovedPurchase(
   }
 
   try {
-    const order = await adapter.createSandboxOrder({
-      amountCents: reserved.request.amountCents,
-      currency: reserved.request.currency,
-      description: reserved.request.description,
-      idempotencyKey: reserved.id,
-    });
-
-    const completed: PurchaseProposal = {
-      ...reserved,
-      status: "order_created",
-      paypalOrderId: order.orderId,
-    };
-    store.saveProposal(completed);
-    return completed;
+    await paypal.createOrder(orderArgsForProposal(reserved));
   } catch (err) {
-    store.saveProposal({
-      ...reserved,
-      status: "pending_approval",
-    });
+    if (reserved.status === "creating_order") {
+      store.saveProposal({ ...reserved, status: "pending_approval" });
+    }
     throw err;
   }
+
+  const completed = store.getProposal(proposalId);
+  if (!completed?.paypalOrderId) {
+    throw new Error(`Proposal ${proposalId} has no order after create_order.`);
+  }
+  store.recordPendingCommitment({
+    proposalId: completed.id,
+    orderId: completed.paypalOrderId,
+    name: completed.request.description,
+    amountCents: completed.request.amountCents,
+    currency: completed.request.currency,
+  });
+  return completed;
 }

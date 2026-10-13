@@ -29,8 +29,11 @@ export async function POST(request: Request) {
   try {
     const input = requestSchema.parse(await request.json());
     const store = getStore();
-    const sheet = store.getBalanceSheet();
-    const proposal = createPurchaseProposal(sheet, input);
+    const proposal = createPurchaseProposal(
+      store.getBalanceSheet(),
+      store.listCommitments(),
+      input,
+    );
     store.saveProposal(proposal);
 
     return NextResponse.json({ proposal });

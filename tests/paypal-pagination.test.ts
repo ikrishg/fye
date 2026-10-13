@@ -6,6 +6,8 @@ import type {
   PayPalListTransactionsResult,
 } from "@/paypal/types";
 import { syncPayPalTransactions } from "@/paypal/sync";
+import { connectPayPalMcp } from "@/mcp/paypal/client";
+import { createMemoryStore } from "@/store/memory-store";
 
 const TOTAL_TXNS = 150;
 
@@ -48,10 +50,12 @@ class PagingAdapter implements PayPalAdapter {
 describe("PayPal sync pagination", () => {
   it("requests later pages when more than 100 transactions exist", async () => {
     const adapter = new PagingAdapter();
-    const lines = await syncPayPalTransactions(adapter, {
+    const paypal = await connectPayPalMcp({ adapter, store: createMemoryStore() });
+    const lines = await syncPayPalTransactions(paypal, {
       startDate: "2026-01-01T00:00:00Z",
       endDate: "2026-01-31T23:59:59Z",
     });
+    await paypal.close();
 
     expect(lines).toHaveLength(TOTAL_TXNS);
     expect(adapter.pagesRequested).toEqual([1, 2]);

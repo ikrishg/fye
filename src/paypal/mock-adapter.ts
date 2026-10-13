@@ -20,10 +20,40 @@ function normalizeFixture(): PayPalTransaction[] {
 }
 
 const allFixtureTxns = normalizeFixture();
-const ordersByIdempotencyKey = new Map<
-  string,
-  { orderId: string; approvalUrl: string }
->();
+
+interface MockOrder {
+  orderId: string;
+  approvalUrl: string;
+  capture: PayPalTransaction;
+}
+
+const ordersByIdempotencyKey = new Map<string, MockOrder>();
+
+export const MOCK_APPROVAL_HOST = "mock-paypal.invalid";
+
+/**
+ * Fixture capture for a mock order, standing in for the buyer paying through
+ * the approve link. Shaped like a PayPal reporting row: `paypal_reference_id`
+ * is the order id, and the amount is the order total as an outflow.
+ */
+function fixtureCapture(input: {
+  key: string;
+  orderId: string;
+  value: string;
+  currency: string;
+  description: string;
+}): PayPalTransaction {
+  return {
+    transaction_id: `MOCK-CAP-${input.key.slice(0, 8)}`,
+    transaction_status: "S",
+    transaction_event_code: "T0006",
+    transaction_amount: { currency_code: input.currency, value: `-${input.value}` },
+    transaction_info: {
+      transaction_subject: input.description,
+      paypal_reference_id: input.orderId,
+    },
+  };
+}
 
 export class MockPayPalAdapter implements PayPalAdapter {
   readonly mode = "mock";
@@ -31,12 +61,16 @@ export class MockPayPalAdapter implements PayPalAdapter {
   async listTransactions(
     params: PayPalListTransactionsParams,
   ): Promise<PayPalListTransactionsResult> {
+    const all = [
+      ...allFixtureTxns,
+      ...[...ordersByIdempotencyKey.values()].map((o) => o.capture),
+    ];
     const pageSize = params.pageSize ?? 100;
     const page = params.page ?? 1;
-    const totalItems = allFixtureTxns.length;
+    const totalItems = all.length;
     const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
     const start = (page - 1) * pageSize;
-    const transactions = allFixtureTxns.slice(start, start + pageSize);
+    const transactions = all.slice(start, start + pageSize);
 
     return {
       transactions,
@@ -53,17 +87,24 @@ export class MockPayPalAdapter implements PayPalAdapter {
   }): Promise<{ orderId: string; approvalUrl: string }> {
     const cached = ordersByIdempotencyKey.get(input.idempotencyKey);
     if (cached) {
-      return cached;
+      return { orderId: cached.orderId, approvalUrl: cached.approvalUrl };
     }
 
     const orderId = `MOCK-ORDER-${input.idempotencyKey.slice(0, 8)}`;
     const value = (input.amountCents / 100).toFixed(2);
-    const result = {
+    const order: MockOrder = {
       orderId,
-      approvalUrl: `https://www.sandbox.paypal.com/checkoutnow?token=MOCK&amount=${value}&currency=${input.currency}&desc=${encodeURIComponent(input.description)}`,
+      approvalUrl: `https://${MOCK_APPROVAL_HOST}/checkoutnow?token=${orderId}`,
+      capture: fixtureCapture({
+        key: input.idempotencyKey,
+        orderId,
+        value,
+        currency: input.currency,
+        description: input.description,
+      }),
     };
-    ordersByIdempotencyKey.set(input.idempotencyKey, result);
-    return result;
+    ordersByIdempotencyKey.set(input.idempotencyKey, order);
+    return { orderId: order.orderId, approvalUrl: order.approvalUrl };
   }
 }
 

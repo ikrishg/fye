@@ -6,7 +6,7 @@ import { resetStoreForTests } from "@/store/memory-store";
 describe("API security helpers", () => {
   it("strips approval tokens from public proposal listings", () => {
     const store = resetStoreForTests();
-    const proposal = createPurchaseProposal(store.getBalanceSheet(), {
+    const proposal = createPurchaseProposal(store.getBalanceSheet(), store.listCommitments(), {
       description: "Test",
       amountCents: 10_00,
       currency: "USD",

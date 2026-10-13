@@ -1,6 +1,8 @@
+import { commitmentIdForOrder, findSettlingLine } from "@/domain/commitments";
 import type {
   BalanceSheet,
   BalanceSheetLine,
+  PendingCommitment,
   PurchaseProposal,
 } from "@/domain/types";
 // file-store imports createMemoryStore back; both are only called at runtime, so the cycle is safe.
@@ -32,6 +34,13 @@ export interface FyeStore {
     id: string,
     approvalToken: string,
   ): PurchaseProposal;
+  /** One commitment per order id; returns the existing one (pending or settled) on repeat. */
+  recordPendingCommitment(
+    input: Omit<PendingCommitment, "id" | "status" | "createdAt">,
+  ): PendingCommitment;
+  listCommitments(): PendingCommitment[];
+  /** Settles pending commitments captured by `syncedLines`; returns only newly settled ones. */
+  settleCommitments(syncedLines: BalanceSheetLine[]): PendingCommitment[];
 }
 
 const defaultSheet: BalanceSheet = {
@@ -76,6 +85,7 @@ function findIngestByExternalId(
 export function createMemoryStore(): FyeStore {
   let sheet = cloneSheet(defaultSheet);
   const proposals = new Map<string, PurchaseProposal>();
+  const commitments = new Map<string, PendingCommitment>();
 
   return {
     getBalanceSheet: () => cloneSheet(sheet),
@@ -123,7 +133,7 @@ export function createMemoryStore(): FyeStore {
       if (proposal.approvalToken !== approvalToken) {
         throw new ProposalReserveError("Invalid approval token");
       }
-      if (proposal.status === "order_created") {
+      if (proposal.status === "order_created" || proposal.status === "settled") {
         return proposal;
       }
       if (proposal.status === "creating_order") {
@@ -140,6 +150,49 @@ export function createMemoryStore(): FyeStore {
       };
       proposals.set(id, reserved);
       return reserved;
+    },
+    recordPendingCommitment(input) {
+      const id = commitmentIdForOrder(input.orderId);
+      const existing = commitments.get(id);
+      if (existing) {
+        return { ...existing };
+      }
+      const commitment: PendingCommitment = {
+        ...input,
+        id,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+      };
+      commitments.set(id, commitment);
+      return { ...commitment };
+    },
+    listCommitments() {
+      return [...commitments.values()].map((c) => ({ ...c }));
+    },
+    settleCommitments(syncedLines) {
+      const settled: PendingCommitment[] = [];
+      for (const commitment of commitments.values()) {
+        if (commitment.status !== "pending") continue;
+        const line = findSettlingLine(commitment, syncedLines);
+        if (!line) continue;
+        const next: PendingCommitment = {
+          ...commitment,
+          status: "settled",
+          settledAt: new Date().toISOString(),
+          settledByTransactionId: line.externalId,
+        };
+        commitments.set(commitment.id, next);
+        settled.push({ ...next });
+        const proposal = proposals.get(commitment.proposalId);
+        if (proposal?.status === "order_created") {
+          proposals.set(proposal.id, {
+            ...proposal,
+            status: "settled",
+            settledByTransactionId: line.externalId,
+          });
+        }
+      }
+      return settled;
     },
   };
 }

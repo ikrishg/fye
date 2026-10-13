@@ -4,7 +4,7 @@ import { ApprovalGateError, executeApprovedPurchase } from "@/agent/purchase";
 import { AuthError } from "@/lib/auth";
 import { assertOwnerAuth } from "@/lib/auth-server";
 import { toPublicProposal } from "@/lib/proposal-view";
-import { createPayPalAdapter } from "@/paypal/factory";
+import { withPayPalMcp } from "@/mcp/paypal/client";
 import { getStore } from "@/store/memory-store";
 
 export const runtime = "nodejs";
@@ -32,12 +32,8 @@ export async function POST(
   const store = getStore();
 
   try {
-    const adapter = createPayPalAdapter();
-    const updated = await executeApprovedPurchase(
-      store,
-      adapter,
-      id,
-      input,
+    const updated = await withPayPalMcp((paypal) =>
+      executeApprovedPurchase(paypal, store, id, input),
     );
     return NextResponse.json({ proposal: toPublicProposal(updated) });
   } catch (err) {
